@@ -7,7 +7,7 @@ import { ir, link } from './rota';
 
 export function Registro({ tarefaKey }: { tarefaKey: string }) {
   const d = useDados();
-  const { alterar } = useLoja();
+  const { alterar, desbloquear } = useLoja();
   const t = tarefa(d, tarefaKey);
   const daSessao = d.sessao?.tarefaKey === tarefaKey;
   const disc = t ? disciplinaDaTarefa(d, t) : undefined;
@@ -36,8 +36,9 @@ export function Registro({ tarefaKey }: { tarefaKey: string }) {
   const seguinte = ordenadas(d).find((x) => !x.feita && x.key !== t.key);
   const continuarHoje = seguinte && planoDeHoje(d).some((x) => x.key === seguinte.key);
 
-  const salvar = (depois: 'seguir' | 'parar') => {
+  const salvar = async (depois: 'seguir' | 'parar') => {
     if (minutos === null) return;
+    if (!(await desbloquear('Para salvar o registro.'))) return;
     const resumo = q > 0 ? ` · ${q} questões, ${a} acertos` : '';
     alterar(`${rotulo(t)} concluída · ${fmtMin(minutos)}${resumo}`, (x) => {
       const tt = x.tarefas.find((y) => y.key === t.key)!;
@@ -148,13 +149,13 @@ export function Registro({ tarefaKey }: { tarefaKey: string }) {
           <footer style={{ marginTop: 'auto', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
             {seguinte && continuarHoje && !t.feita ? (
               <>
-                <button type="button" className="btn btn-mark" disabled={minutos === null} onClick={() => salvar('seguir')}>
+                <button type="button" className="btn btn-mark" disabled={minutos === null} onClick={() => void salvar('seguir')}>
                   Salvar e seguir para {nomeDisciplina(d, seguinte)}
                 </button>
-                <button type="button" className="btn btn-texto" disabled={minutos === null} onClick={() => salvar('parar')}>Salvar e parar por hoje</button>
+                <button type="button" className="btn btn-texto" disabled={minutos === null} onClick={() => void salvar('parar')}>Salvar e parar por hoje</button>
               </>
             ) : (
-              <button type="button" className="btn btn-mark" disabled={minutos === null} onClick={() => salvar('parar')}>Salvar</button>
+              <button type="button" className="btn btn-mark" disabled={minutos === null} onClick={() => void salvar('parar')}>Salvar</button>
             )}
             {t.feita && <button type="button" className="btn btn-texto" onClick={desfazer}>Marcar como não feita</button>}
           </footer>

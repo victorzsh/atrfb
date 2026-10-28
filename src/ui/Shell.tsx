@@ -16,7 +16,7 @@ const MENU: [Secao, string, string][] = [
 function Sync() {
   const { sync, github } = useLoja();
   if (!github) return <a className="sync" href={link('dados')}><i />só neste aparelho</a>;
-  const txt = { local: 'só neste aparelho', carregando: 'carregando…', salvando: 'salvando…', salvo: 'salvo', erro: 'erro ao salvar' }[sync.estado];
+  const txt = { local: 'só neste aparelho', carregando: 'carregando…', salvando: 'salvando…', salvo: 'salvo', erro: 'erro ao salvar', bloqueado: 'bloqueado' }[sync.estado];
   return (
     <a className={`sync ${sync.estado}`} href={link('dados')} title={sync.erro ?? undefined}>
       <i />
@@ -26,7 +26,7 @@ function Sync() {
 }
 
 export function Shell({ secao, noite, children, semTopo }: { secao: Secao; noite?: boolean; children: ReactNode; semTopo?: boolean }) {
-  const { tema, setTema } = useLoja();
+  const { tema, setTema, temSenha, desbloqueado, desbloquear, bloquear } = useLoja();
   const classe = noite ? 'tela noite' : `tela papel${tema === 'escuro' ? ' escuro' : ''}`;
   return (
     <div className={classe}>
@@ -40,6 +40,11 @@ export function Shell({ secao, noite, children, semTopo }: { secao: Secao; noite
           </nav>
           <div className="direita">
             <Sync />
+            {temSenha && (
+              <button type="button" className="btn-tema" onClick={() => (desbloqueado ? bloquear() : void desbloquear())} title={desbloqueado ? 'Bloquear: alterações e downloads voltam a pedir a senha' : 'Desbloquear com a senha'}>
+                {desbloqueado ? 'BLOQUEAR' : 'DESBLOQUEAR'}
+              </button>
+            )}
             {!noite && (
               <button type="button" className="btn-tema" onClick={() => setTema(tema === 'escuro' ? 'claro' : 'escuro')}>
                 {tema === 'escuro' ? 'MODO CLARO' : 'MODO ESCURO'}

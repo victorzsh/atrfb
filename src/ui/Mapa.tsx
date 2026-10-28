@@ -52,7 +52,7 @@ export function Mapa() {
           <div className="tab">
             <div className="tab-linha tab-regua">
               <span />
-              <span className="quadros" style={{ flexWrap: 'nowrap' }}>
+              <span className="quadros" style={{ flexWrap: 'nowrap', overflow: 'hidden' }}>
                 {Array.from({ length: maxAulas }, (_, i) => (
                   <span key={i} style={{ width: 20, flex: 'none', textAlign: 'center' }}>{i === 0 || (i + 1) % 5 === 0 ? i + 1 : ''}</span>
                 ))}

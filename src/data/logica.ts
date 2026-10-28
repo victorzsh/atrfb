@@ -122,25 +122,42 @@ export function proximaAula(disc: Disciplina): number | null {
   return disc.aulas.find((a) => !a.tr)?.n ?? null;
 }
 
-// Plano: tarefas feitas em cada dia e as pendentes distribuídas pela meta diária,
-// a partir de hoje.
+// Plano da semana: as tarefas feitas ficam no dia em que foram feitas; as que
+// você arrastou para um dia ficam nele; o resto segue a ordem da trilha,
+// preenchendo cada dia até a meta diária, a partir de hoje.
+export function fixada(t: Tarefa, h = hoje()): boolean {
+  return !t.feita && !!t.plano && t.plano >= h;
+}
+
 export function plano(d: Dados, desde: string, ate: string): Map<string, Tarefa[]> {
   const dias = new Map<string, Tarefa[]>();
   for (let x = desde; x <= ate; x = somarDias(x, 1)) dias.set(x, []);
-  for (const t of ordenadas(d)) if (t.feita && t.data && dias.has(t.data)) dias.get(t.data)!.push(t);
-
   const h = hoje();
+  const ord = ordenadas(d);
+  const pos = new Map(ord.map((t, i) => [t.key, i]));
+
+  const fixas = new Map<string, number>();
+  for (const t of ord) {
+    if (t.feita && t.data && dias.has(t.data)) dias.get(t.data)!.push(t);
+    if (fixada(t, h)) {
+      fixas.set(t.plano!, (fixas.get(t.plano!) ?? 0) + t.chMin);
+      dias.get(t.plano!)?.push(t);
+    }
+  }
+
   let dia = h;
-  let usado = (dias.get(h) ?? []).reduce((s, t) => s + (t.chEfetivaMin ?? t.chMin), 0);
-  for (const t of pendentes(d)) {
-    while (usado > 0 && usado + t.chMin > d.minutosPorDia + 15) {
+  let usado = ord.filter((t) => t.feita && t.data === h).reduce((s, t) => s + (t.chEfetivaMin ?? t.chMin), 0) + (fixas.get(h) ?? 0);
+  for (const t of ord) {
+    if (t.feita || fixada(t, h)) continue;
+    for (let guarda = 0; usado > 0 && usado + t.chMin > d.minutosPorDia + 15 && guarda < 3650; guarda++) {
       dia = somarDias(dia, 1);
-      usado = 0;
+      usado = fixas.get(dia) ?? 0;
     }
     if (dia > ate) break;
-    if (dias.has(dia)) dias.get(dia)!.push(t);
+    dias.get(dia)?.push(t);
     usado += t.chMin;
   }
+  for (const ts of dias.values()) ts.sort((a, b) => pos.get(a.key)! - pos.get(b.key)!);
   return dias;
 }
 
@@ -185,7 +202,7 @@ export function juntar(atual: Dados | null, lida: Leitura): Dados {
   const tarefasAtuais = new Map(base.tarefas.map((t) => [t.key, t]));
   const tarefas = lida.tarefas.map((nova) => {
     const velha = tarefasAtuais.get(nova.key);
-    return velha ? { ...nova, feita: velha.feita, data: velha.data, chEfetivaMin: velha.chEfetivaMin, questoes: velha.questoes, acertos: velha.acertos } : nova;
+    return velha ? { ...nova, feita: velha.feita, data: velha.data, chEfetivaMin: velha.chEfetivaMin, questoes: velha.questoes, acertos: velha.acertos, plano: velha.plano ?? null } : nova;
   });
   // Tarefas que só existem no app (planilha antiga) continuam.
   for (const t of base.tarefas) if (!tarefas.some((x) => x.key === t.key)) tarefas.push(t);

@@ -1,12 +1,19 @@
 import type { Dados } from './model';
-import type { ConfigGitHub } from './github';
+import type { Acesso, Cifra } from './seguranca';
 
 // Cópia neste aparelho: funciona sem internet e abre na hora.
-// O token fica só aqui, nunca vai para o dados.json.
+// O token do GitHub só fica aqui cifrado pela senha, nunca em texto puro.
+
+export interface GithubLocal {
+  dono: string;
+  repo: string;
+  token: Cifra;
+}
 
 const K_DADOS = 'atrfb:dados';
 const K_PENDENTE = 'atrfb:pendente';
 const K_GITHUB = 'atrfb:github';
+const K_ACESSO = 'atrfb:acesso';
 const K_TEMA = 'atrfb:tema';
 
 function ler<T>(k: string): T | null {
@@ -32,13 +39,21 @@ export const local = {
   salvarDados: (d: Dados | null) => gravar(K_DADOS, d),
   pendente: () => ler<string[]>(K_PENDENTE) ?? [],
   salvarPendente: (msgs: string[]) => gravar(K_PENDENTE, msgs.length ? msgs : null),
-  github: () => ler<ConfigGitHub>(K_GITHUB),
-  salvarGithub: (c: ConfigGitHub | null) => gravar(K_GITHUB, c),
+  github: () => {
+    const g = ler<GithubLocal>(K_GITHUB);
+    // Configuração antiga, com token em texto puro: descarta e pede para conectar de novo.
+    return g && typeof g.token === 'object' ? g : null;
+  },
+  salvarGithub: (c: GithubLocal | null) => gravar(K_GITHUB, c),
+  acesso: () => ler<Acesso>(K_ACESSO),
+  salvarAcesso: (a: Acesso | null) => gravar(K_ACESSO, a),
   tema: () => (ler<string>(K_TEMA) === 'escuro' ? 'escuro' : 'claro') as 'claro' | 'escuro',
   salvarTema: (t: 'claro' | 'escuro') => gravar(K_TEMA, t),
 };
 
-// A planilha original (para exportar) fica no IndexedDB, que aguenta arquivos.
+// IndexedDB: a planilha original (para exportar) e, se você pedir para lembrar,
+// a chave desbloqueada por algumas horas. A chave é um CryptoKey não
+// exportável: dá para usar neste navegador, mas não para copiar.
 function db(): Promise<IDBDatabase> {
   return new Promise((ok, erro) => {
     const r = indexedDB.open('atrfb', 1);
@@ -48,12 +63,12 @@ function db(): Promise<IDBDatabase> {
   });
 }
 
-export async function lerPlanilhaLocal(): Promise<Uint8Array | null> {
+async function idbLer<T>(k: string): Promise<T | null> {
   try {
     const d = await db();
     return await new Promise((ok) => {
-      const r = d.transaction('arquivos').objectStore('arquivos').get('planilha');
-      r.onsuccess = () => ok((r.result as Uint8Array) ?? null);
+      const r = d.transaction('arquivos').objectStore('arquivos').get(k);
+      r.onsuccess = () => ok((r.result as T) ?? null);
       r.onerror = () => ok(null);
     });
   } catch {
@@ -61,16 +76,39 @@ export async function lerPlanilhaLocal(): Promise<Uint8Array | null> {
   }
 }
 
-export async function salvarPlanilhaLocal(bytes: Uint8Array): Promise<void> {
+async function idbGravar(k: string, v: unknown): Promise<void> {
   try {
     const d = await db();
     await new Promise<void>((ok) => {
       const tx = d.transaction('arquivos', 'readwrite');
-      tx.objectStore('arquivos').put(bytes, 'planilha');
+      if (v === null) tx.objectStore('arquivos').delete(k);
+      else tx.objectStore('arquivos').put(v, k);
       tx.oncomplete = () => ok();
       tx.onerror = () => ok();
     });
   } catch {
-    /* sem IndexedDB: a planilha continua no GitHub */
+    /* sem IndexedDB */
   }
+}
+
+export const lerPlanilhaLocal = () => idbLer<Uint8Array>('planilha');
+export const salvarPlanilhaLocal = (bytes: Uint8Array) => idbGravar('planilha', bytes);
+
+export async function chaveLembrada(): Promise<CryptoKey | null> {
+  const r = await idbLer<{ chave: CryptoKey; expira: number }>('chave');
+  if (!r) return null;
+  if (r.expira < Date.now()) {
+    await idbGravar('chave', null);
+    return null;
+  }
+  return r.chave;
+}
+
+export const lembrarChave = (chave: CryptoKey | null, horas = 8) =>
+  idbGravar('chave', chave ? { chave, expira: Date.now() + horas * 3600_000 } : null);
+
+export async function apagarTudo(): Promise<void> {
+  for (const k of [K_DADOS, K_PENDENTE, K_GITHUB, K_ACESSO]) gravar(k, null);
+  await idbGravar('chave', null);
+  await idbGravar('planilha', null);
 }

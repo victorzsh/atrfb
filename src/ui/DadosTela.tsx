@@ -4,6 +4,7 @@ import type { Dados } from '../data/model';
 import type { Versao } from '../data/github';
 import { fmtMin, lerMin } from '../data/logica';
 import { exportarPlanilha } from '../xlsx/planilha';
+import { SENHA_MINIMA } from '../data/seguranca';
 import { Shell } from './Shell';
 import { link } from './rota';
 
@@ -36,9 +37,13 @@ function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode
 }
 
 function Conectar() {
-  const { conectar } = useLoja();
+  const { conectar, temSenha } = useLoja();
   const [repo, setRepo] = useState('');
   const [token, setToken] = useState('');
+  const [senha, setSenha] = useState('');
+  const [repetir, setRepetir] = useState('');
+  const [redefinir, setRedefinir] = useState(false);
+  const nova = !temSenha || redefinir;
   const [msg, setMsg] = useState<{ ok: boolean; txt: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
@@ -46,11 +51,15 @@ function Conectar() {
     e.preventDefault();
     const m = /^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(repo.trim());
     if (!m) return setMsg({ ok: false, txt: 'Use o formato usuario/repositorio.' });
+    if (nova && senha.length < SENHA_MINIMA) return setMsg({ ok: false, txt: `A senha precisa ter pelo menos ${SENHA_MINIMA} caracteres.` });
+    if (nova && senha !== repetir) return setMsg({ ok: false, txt: 'As duas senhas não são iguais.' });
     setOcupado(true);
     setMsg(null);
     try {
-      setMsg({ ok: true, txt: await conectar({ dono: m[1], repo: m[2], token: token.trim() }) });
+      setMsg({ ok: true, txt: await conectar({ dono: m[1], repo: m[2], token: token.trim() }, senha, redefinir) });
       setToken('');
+      setSenha('');
+      setRepetir('');
     } catch (err) {
       setMsg({ ok: false, txt: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -66,7 +75,7 @@ function Conectar() {
           Crie um <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">token de acesso “fine-grained”</a> só
           para esse repositório, com a permissão <strong>Contents: Read and write</strong>.
         </li>
-        <li>Cole os dois aqui. O token fica guardado só neste navegador.</li>
+        <li>Cole os dois aqui com a senha do app. O token fica neste navegador cifrado pela senha; em outro aparelho, use a mesma senha.</li>
       </ol>
       <label className="campo-rotulo">
         REPOSITÓRIO
@@ -76,9 +85,71 @@ function Conectar() {
         TOKEN
         <input className="campo" type="password" placeholder="github_pat_…" value={token} onChange={(e) => setToken(e.target.value)} required autoComplete="off" />
       </label>
+      <label className="campo-rotulo">
+        {nova ? 'SENHA DO APP (NOVA)' : 'SENHA DO APP'}
+        <input className="campo" type="password" value={senha} onChange={(e) => setSenha(e.target.value)} required autoComplete={nova ? 'new-password' : 'current-password'} />
+      </label>
+      {nova && (
+        <label className="campo-rotulo">
+          REPITA A SENHA
+          <input className="campo" type="password" value={repetir} onChange={(e) => setRepetir(e.target.value)} required autoComplete="new-password" />
+        </label>
+      )}
+      <label style={{ display: 'flex', gap: 10, fontSize: 14, alignItems: 'flex-start', cursor: 'pointer', lineHeight: 1.4 }}>
+        <input type="checkbox" checked={redefinir} onChange={(e) => setRedefinir(e.target.checked)} style={{ width: 18, height: 18, margin: '1px 0 0', accentColor: 'var(--ink)' }} />
+        Esqueci a senha: definir uma nova (o token comprova que o repositório é seu)
+      </label>
       <button type="submit" className="btn btn-ink" disabled={ocupado} style={{ alignSelf: 'flex-start' }}>{ocupado ? 'Conectando…' : 'Conectar'}</button>
       {msg && <p className={msg.ok ? 'ok-txt' : 'erro-txt'} style={{ margin: 0 }}>{msg.txt}</p>}
     </form>
+  );
+}
+
+function TrocarSenha() {
+  const { temSenha, trocarSenha, desbloqueado, bloquear } = useLoja();
+  const [aberto, setAberto] = useState(false);
+  const [atual, setAtual] = useState('');
+  const [nova, setNova] = useState('');
+  const [repetir, setRepetir] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; txt: string } | null>(null);
+  if (!temSenha) return null;
+
+  const enviar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (nova.length < SENHA_MINIMA) return setMsg({ ok: false, txt: `Use pelo menos ${SENHA_MINIMA} caracteres.` });
+    if (nova !== repetir) return setMsg({ ok: false, txt: 'As duas senhas não são iguais.' });
+    try {
+      await trocarSenha(atual, nova);
+      setMsg({ ok: true, txt: 'Senha trocada. Use a nova senha em todos os aparelhos.' });
+      setAberto(false);
+      setAtual('');
+      setNova('');
+      setRepetir('');
+    } catch (err) {
+      setMsg({ ok: false, txt: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <span className="rotulo">Senha do app</span>
+      <span className="muted" style={{ fontSize: 13, maxWidth: 560, lineHeight: 1.45 }}>
+        Sem a senha dá para ver tudo, mas não alterar dados nem baixar arquivos. Ela vale para todos os aparelhos conectados ao mesmo repositório.
+      </span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <button type="button" className="btn btn-linha btn-peq" onClick={() => setAberto(!aberto)}>Trocar senha</button>
+        {desbloqueado && <button type="button" className="btn btn-texto btn-peq" onClick={bloquear}>Bloquear agora</button>}
+      </div>
+      {aberto && (
+        <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 360 }}>
+          <label className="campo-rotulo">SENHA ATUAL<input className="campo" type="password" autoComplete="current-password" value={atual} onChange={(e) => setAtual(e.target.value)} required /></label>
+          <label className="campo-rotulo">NOVA SENHA<input className="campo" type="password" autoComplete="new-password" value={nova} onChange={(e) => setNova(e.target.value)} required /></label>
+          <label className="campo-rotulo">REPITA A NOVA SENHA<input className="campo" type="password" autoComplete="new-password" value={repetir} onChange={(e) => setRepetir(e.target.value)} required /></label>
+          <button type="submit" className="btn btn-ink btn-peq" style={{ alignSelf: 'flex-start' }}>Salvar nova senha</button>
+        </form>
+      )}
+      {msg && <p className={msg.ok ? 'ok-txt' : 'erro-txt'} style={{ margin: 0 }}>{msg.txt}</p>}
+    </section>
   );
 }
 
@@ -90,14 +161,15 @@ export function DadosTela() {
   const [meta, setMeta] = useState(dados ? fmtMin(dados.minutosPorDia) : '4h30');
 
   useEffect(() => {
-    if (!github) return setVersoes(null);
+    if (!github || !loja.desbloqueado) return setVersoes(null);
     loja.versoes().then(setVersoes, () => setVersoes([]));
     // Recarrega a lista quando um salvamento termina.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [github, sync.em]);
+  }, [github, sync.em, loja.desbloqueado]);
 
   const exportarXlsx = async () => {
     if (!dados) return;
+    if (!(await loja.desbloquear('Para baixar a planilha.'))) return;
     setAviso(null);
     try {
       const original = await loja.planilha();
@@ -112,6 +184,7 @@ export function DadosTela() {
   const importarJson = async (f: File | undefined) => {
     if (!f) return;
     try {
+      if (!(await loja.desbloquear('Para importar um backup.'))) return;
       const d = JSON.parse(await f.text()) as Dados;
       if (d.versao !== 1 || !Array.isArray(d.tarefas) || !Array.isArray(d.disciplinas)) throw new Error('Este .json não é um backup do app.');
       if (!confirm('Substituir os dados atuais por este backup? A versão atual continua no histórico do GitHub.')) return;
@@ -124,6 +197,7 @@ export function DadosTela() {
 
   const restaurar = async (v: Versao) => {
     if (!confirm(`Voltar os dados para a versão de ${quando(v.data)}? A versão atual continua no histórico.`)) return;
+    if (!(await loja.desbloquear('Para restaurar uma versão.'))) return;
     try {
       await loja.restaurar(v);
       setAviso({ ok: true, txt: 'Versão restaurada.' });
@@ -133,7 +207,7 @@ export function DadosTela() {
   };
 
   const estado = github
-    ? { local: 'Só neste aparelho', carregando: 'Carregando…', salvando: 'Salvando…', salvo: sync.em ? `Salvo às ${new Date(sync.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Salvo', erro: `Erro: ${sync.erro}` }[sync.estado]
+    ? { local: 'Só neste aparelho', carregando: 'Carregando…', salvando: 'Salvando…', salvo: sync.em ? `Salvo às ${new Date(sync.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Salvo', erro: `Erro: ${sync.erro}`, bloqueado: 'Bloqueado: digite a senha para sincronizar' }[sync.estado]
     : 'Só neste aparelho';
 
   return (
@@ -191,7 +265,7 @@ export function DadosTela() {
                   <span className="rotulo">Levar para fora</span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                     <button type="button" className="btn btn-ink" onClick={() => void exportarXlsx()}>Baixar .xlsx no formato da Estratégia</button>
-                    <button type="button" className="btn btn-linha" onClick={() => baixar(`atrfb-dados-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(dados, null, 1), 'application/json')}>
+                    <button type="button" className="btn btn-linha" onClick={async () => (await loja.desbloquear('Para baixar o backup.')) && baixar(`atrfb-dados-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(dados, null, 1), 'application/json')}>
                       Baixar .json
                     </button>
                     <label className="btn btn-texto" style={{ cursor: 'pointer' }}>
@@ -204,6 +278,7 @@ export function DadosTela() {
                   </span>
                   {aviso && <p className={aviso.ok ? 'ok-txt' : 'erro-txt'} style={{ margin: 0 }}>{aviso.txt}</p>}
                 </section>
+                <TrocarSenha />
                 <a href={link('analytics')} className="muted" style={{ fontSize: 14 }}>Abrir Analytics</a>
               </>
             )}
@@ -215,7 +290,9 @@ export function DadosTela() {
                 <span>Versões</span>
                 <span className="muted">últimas {versoes?.length ?? 0}</span>
               </div>
-              {versoes === null && <span className="muted" style={{ padding: '14px 0' }}>Carregando…</span>}
+              {versoes === null && (loja.desbloqueado
+                ? <span className="muted" style={{ padding: '14px 0' }}>Carregando…</span>
+                : <button type="button" className="btn btn-linha btn-peq" style={{ alignSelf: 'flex-start', marginTop: 14 }} onClick={() => void loja.desbloquear('Para ver as versões salvas.')}>Desbloquear para ver as versões</button>)}
               {versoes?.map((v, i) => (
                 <div key={v.sha} className="lista-linha" style={{ gridTemplateColumns: '96px minmax(0, 1fr) auto', minHeight: 48 }}>
                   <span className="mono muted" style={{ fontSize: 12 }}>{quando(v.data)}</span>

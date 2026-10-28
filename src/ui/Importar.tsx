@@ -14,7 +14,7 @@ interface Lido {
 }
 
 export function Importar({ primeira }: { primeira?: boolean }) {
-  const { dados, substituir, salvarPlanilha } = useLoja();
+  const { dados, substituir, salvarPlanilha, desbloquear } = useLoja();
   const [lido, setLido] = useState<Lido | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [sobre, setSobre] = useState(false);
@@ -36,6 +36,7 @@ export function Importar({ primeira }: { primeira?: boolean }) {
 
   const confirmar = async () => {
     if (!lido) return;
+    if (!(await desbloquear(primeira ? 'Antes de começar, defina a senha do app.' : 'Para adicionar a trilha.'))) return;
     setOcupado(true);
     const msg = primeira
       ? 'Importação da planilha original'

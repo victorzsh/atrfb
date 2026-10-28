@@ -9,8 +9,18 @@ import { Semana } from './Semana';
 import { Analytics } from './Analytics';
 import { DadosTela } from './DadosTela';
 import { Importar } from './Importar';
+import { PedidoSenha } from './Senha';
 
 export function App() {
+  return (
+    <>
+      <Rotas />
+      <PedidoSenha />
+    </>
+  );
+}
+
+function Rotas() {
   const { dados, pronto } = useLoja();
   const [r0, r1] = useRota();
 

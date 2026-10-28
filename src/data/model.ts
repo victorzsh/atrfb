@@ -31,6 +31,7 @@ export interface Tarefa {
   questoes: number | null;
   acertos: number | null;
   row: number; // linha na aba CICLO
+  plano?: string | null; // dia em que você fixou a tarefa na Semana (AAAA-MM-DD)
 }
 
 export interface Sessao {

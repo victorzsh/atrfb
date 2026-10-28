@@ -178,8 +178,23 @@ label.campo-rotulo .campo { width: 100%; text-align: left; color: var(--ink); }
 .bloco { min-height: 84px; border: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; text-decoration: none; }
 .bloco.feito { background: var(--done); border-color: var(--done); color: var(--onDone); }
 .bloco.agora { background: var(--mark); border-color: #141414; color: #141414; }
+button.bloco { font: inherit; color: inherit; background: transparent; text-align: left; width: 100%; }
+.bloco.movel { cursor: grab; }
+.bloco.movel:hover { border-color: var(--ink); }
+.bloco.movel:active { cursor: grabbing; }
+.bloco.sel { outline: 2px solid var(--ink); outline-offset: 2px; }
+.bloco.fantasma { opacity: .35; }
+.bloco.destino { min-height: 52px; border-style: dashed; border-color: var(--ink); justify-content: center; align-items: center; font-size: 13px; color: var(--muted); cursor: pointer; }
+.bloco.destino:hover { color: var(--ink); background: var(--track); }
+.dia { display: flex; flex-direction: column; gap: 6px; min-height: 240px; padding: 4px; margin: -4px; }
+.dia.alvo { background: var(--track); outline: 1px dashed var(--ink); }
+.dia.passado .bloco.feito { opacity: .9; }
+.barra-mover { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px 48px; background: var(--bg); border-top: 2px solid var(--ink); }
 @media (max-width: 720px) {
   .semana { grid-template-columns: 1fr; min-width: 0; }
+  .dia { min-height: 0; }
+  .barra-mover { bottom: calc(64px + env(safe-area-inset-bottom)); padding: 12px 16px; }
+  .barra-mover > div { margin-left: 0 !important; }
 }
 
 /* Analytics */
