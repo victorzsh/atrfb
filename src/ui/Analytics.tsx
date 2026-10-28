@@ -26,8 +26,7 @@ export function Analytics() {
     const a = ts.reduce((x, t) => x + (t.acertos ?? 0), 0);
     return { s, min, q, a };
   });
-  const metaSemana = d.minutosPorDia * 7;
-  const maxMin = Math.max(metaSemana * 1.2, ...porSemana.map((x) => x.min));
+  const maxMin = Math.max(60, ...porSemana.map((x) => x.min)) * 1.1;
 
   const minTotal = naJanela.reduce((x, t) => x + (t.chEfetivaMin ?? 0), 0);
   const qTotal = naJanela.reduce((x, t) => x + (t.questoes ?? 0), 0);
@@ -87,16 +86,15 @@ export function Analytics() {
             <section style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12 }}>
                 <h2 className="sub">Horas por semana</h2>
-                <span className="muted" style={{ fontSize: 13 }}>meta de {fmtMin(metaSemana)} tracejada; amarelo bateu a meta</span>
+                <span className="muted" style={{ fontSize: 13 }}>tempo efetivo registrado; a semana atual em amarelo</span>
               </div>
               <div className="grafico-barras">
-                <div className="meta-linha" style={{ bottom: `${(metaSemana / maxMin) * 100}%` }} />
                 {porSemana.map((x) => (
                   <div
                     key={x.s}
                     className="barra"
                     title={`Semana de ${dataCurta(x.s)}: ${fmtMin(x.min)}`}
-                    style={{ height: `${(x.min / maxMin) * 100}%`, background: x.min >= metaSemana ? 'var(--mark)' : 'var(--chart)' }}
+                    style={{ height: `${(x.min / maxMin) * 100}%`, background: x.s === segundaDaSemana(h) ? 'var(--mark)' : 'var(--chart)' }}
                   />
                 ))}
               </div>

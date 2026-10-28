@@ -188,7 +188,10 @@ button.bloco { font: inherit; color: inherit; background: transparent; text-alig
 .bloco.destino:hover { color: var(--ink); background: var(--track); }
 .dia { display: flex; flex-direction: column; gap: 6px; min-height: 240px; padding: 4px; margin: -4px; }
 .dia.alvo { background: var(--track); outline: 1px dashed var(--ink); }
-.dia.passado .bloco.feito { opacity: .9; }
+.a-planejar { display: flex; flex-direction: column; gap: 20px; padding: 8px; margin: 0 -8px; }
+.a-planejar.alvo { background: var(--track); outline: 1px dashed var(--ink); }
+.soltas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.bloco.compacto { min-height: 64px; padding: 8px; gap: 6px; }
 .barra-mover { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px 48px; background: var(--bg); border-top: 2px solid var(--ink); }
 @media (max-width: 720px) {
   .semana { grid-template-columns: 1fr; min-width: 0; }

@@ -7,7 +7,7 @@ repositório **privado** seu no GitHub e exporta de volta para o mesmo `.xlsx`.
 ## Telas
 
 - **Agora**: a próxima tarefa, o cronômetro da sessão e o registro de tempo, questões e acertos.
-- **Semana**: os 7 dias com o que foi feito e o planejamento. Arraste uma tarefa para outro dia (ou para ← → para outra semana); no celular, toque nela e depois no dia. O que não for arrastado segue a ordem da trilha pela meta diária.
+- **Semana**: você decide o dia de cada tarefa. Arraste para um dia (ou para ← → para outra semana); no celular, toque nela e depois no dia. Em **Minha agenda** você define os horários de estudo de cada dia da semana; **Encaixar na agenda** coloca as tarefas sem dia (de uma trilha ou todas) nesses horários, na ordem da trilha, sem mexer no que já tem dia. As tarefas sem dia ficam em **A planejar**.
 - **Ciclo**: todas as trilhas, tarefa por tarefa.
 - **Mapa**: o tabuleiro de aulas (teoria + revisão e acertos) e a tela de cada disciplina.
 - **Analytics**: horas por semana, acerto no tempo, acerto por disciplina e constância.

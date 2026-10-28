@@ -31,7 +31,14 @@ export interface Tarefa {
   questoes: number | null;
   acertos: number | null;
   row: number; // linha na aba CICLO
-  plano?: string | null; // dia em que você fixou a tarefa na Semana (AAAA-MM-DD)
+  plano?: string | null; // dia em que você colocou a tarefa na Semana (AAAA-MM-DD)
+  hora?: string | null; // início no dia ("08:00"), quando encaixada na agenda
+}
+
+// Horários de estudo de um dia da semana, ex.: [{ inicio: '08:00', fim: '11:00' }].
+export interface Intervalo {
+  inicio: string;
+  fim: string;
 }
 
 export interface Sessao {
@@ -49,7 +56,8 @@ export interface Nota {
 export interface Dados {
   versao: 1;
   atualizadoEm: string;
-  minutosPorDia: number;
+  minutosPorDia: number; // não usado mais; mantido para dados antigos
+  agenda?: Intervalo[][]; // 7 dias, 0 = segunda
   disciplinas: Disciplina[];
   tarefas: Tarefa[];
   sessao: Sessao | null;

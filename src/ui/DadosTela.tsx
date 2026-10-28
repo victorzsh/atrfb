@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useLoja } from '../data/store';
 import type { Dados } from '../data/model';
 import type { Versao } from '../data/github';
-import { fmtMin, lerMin } from '../data/logica';
 import { exportarPlanilha } from '../xlsx/planilha';
 import { SENHA_MINIMA } from '../data/seguranca';
 import { Shell } from './Shell';
@@ -158,7 +157,6 @@ export function DadosTela() {
   const { dados, github, sync } = loja;
   const [versoes, setVersoes] = useState<Versao[] | null>(null);
   const [aviso, setAviso] = useState<{ ok: boolean; txt: string } | null>(null);
-  const [meta, setMeta] = useState(dados ? fmtMin(dados.minutosPorDia) : '4h30');
 
   useEffect(() => {
     if (!github || !loja.desbloqueado) return setVersoes(null);
@@ -244,22 +242,6 @@ export function DadosTela() {
 
             {dados && (
               <>
-                <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <label className="campo-rotulo" style={{ maxWidth: 280 }}>
-                    META DIÁRIA
-                    <input
-                      className="campo"
-                      value={meta}
-                      onChange={(e) => setMeta(e.target.value)}
-                      onBlur={() => {
-                        const m = lerMin(meta);
-                        if (m && m !== dados.minutosPorDia) loja.alterar(`Meta diária: ${fmtMin(m)}`, (x) => { x.minutosPorDia = m; });
-                        setMeta(fmtMin(m ?? dados.minutosPorDia));
-                      }}
-                    />
-                  </label>
-                  <span className="muted" style={{ fontSize: 13 }}>Usada para montar o dia no Agora e a previsão da Semana.</span>
-                </section>
 
                 <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <span className="rotulo">Levar para fora</span>

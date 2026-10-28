@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Dados, Tarefa } from '../data/model';
-import { fmtMin, fmtRelogio, hoje, nomeDisciplina, ordenadas, pct, planoDeHoje, rotulo, somarDias, tarefa, diaCurto, dataCurta } from '../data/logica';
+import { atrasada, fmtMin, fmtRelogio, hoje, nomeDisciplina, ordenadas, pct, planoDeHoje, rotulo, somarDias, tarefa, diaCurto, dataCurta } from '../data/logica';
 import { Shell } from './Shell';
 import { ir, link } from './rota';
 
@@ -39,7 +39,9 @@ function Inicio() {
   const d = useDados();
   const { alterar } = useLoja();
   const plano = planoDeHoje(d);
-  const proxima = plano.find((t) => !t.feita) ?? ordenadas(d).find((t) => !t.feita);
+  const planejada = plano.find((t) => !t.feita);
+  const proxima = planejada ?? ordenadas(d).find((t) => !t.feita);
+  const atrasadas = d.tarefas.filter((t) => atrasada(t)).length;
   const minutos = plano.reduce((s, t) => s + (t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin), 0);
   const ontem = somarDias(hoje(), -1);
   const deOntem = d.tarefas.filter((t) => t.feita && t.data === ontem);
@@ -60,12 +62,14 @@ function Inicio() {
       <div className="tela-agora">
         <div className="miolo">
           <span className="rotulo">
-            {diaCurto(hoje())} {dataCurta(hoje())} · {plano.length} {plano.length === 1 ? 'tarefa' : 'tarefas'} · {fmtMin(minutos)}
+            {diaCurto(hoje())} {dataCurta(hoje())} · {plano.length ? `${plano.length} ${plano.length === 1 ? 'tarefa planejada' : 'tarefas planejadas'} · ${fmtMin(minutos)}` : 'nada planejado'}
           </span>
           {proxima ? (
             <main style={{ display: 'flex', flexDirection: 'column', gap: 28, maxWidth: 1000 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <span style={{ fontSize: 20, color: 'var(--muted)' }}>{proxima.feita ? 'Tudo feito hoje. A próxima é' : 'A próxima é'}</span>
+                <span style={{ fontSize: 20, color: 'var(--muted)' }}>
+                  {planejada ? 'A próxima é' : plano.length ? 'O que você planejou para hoje está feito. Pela ordem da trilha, a próxima é' : 'Nada planejado para hoje. Pela ordem da trilha, a próxima é'}
+                </span>
                 <h1 style={{ fontSize: 64, lineHeight: 1 }}>{nomeDisciplina(d, proxima)}</h1>
                 <p style={{ margin: 0, fontSize: 20, lineHeight: 1.45, color: 'var(--text2)', maxWidth: 760, textWrap: 'pretty' }}>{proxima.descricao}</p>
               </div>
@@ -73,6 +77,7 @@ function Inicio() {
                 <button type="button" className="btn btn-mark" onClick={() => comecar(alterar, proxima)}>
                   Começar <span className="tecla">ENTER</span>
                 </button>
+                {!planejada && <a className="btn btn-linha" href={link('semana')}>Planejar a semana</a>}
                 <a className="btn btn-texto" href={link('ciclo')}>Escolher outra tarefa</a>
               </div>
             </main>
@@ -88,7 +93,7 @@ function Inicio() {
             <section aria-label="Plano do dia" className="plano-dia" style={{ ['--cols' as string]: Math.min(plano.length, 4) }}>
               {plano.slice(0, 4).map((t) => (
                 <div key={t.key} style={{ borderTop: `3px solid ${t === proxima ? 'var(--mark)' : t.feita ? 'var(--ink)' : '#2E2C28'}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span className="rotulo">{rotulo(t)} · {fmtMin(t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin)}{t.feita ? ' · feita' : ''}</span>
+                  <span className="rotulo">{!t.feita && t.hora ? `${t.hora} · ` : ''}{rotulo(t)} · {fmtMin(t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin)}{t.feita ? ' · feita' : ''}</span>
                   <span style={{ fontSize: 15, color: t === proxima ? 'var(--ink)' : 'var(--text2)' }}>{nomeDisciplina(d, t)}</span>
                 </div>
               ))}
@@ -99,6 +104,7 @@ function Inicio() {
             {proxima && <Trilho d={d} atual={proxima} />}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 32px', fontSize: 14, color: 'var(--muted)' }}>
               {proxima && <span style={{ color: 'var(--ink)' }}>Trilha {proxima.trilha} · {daTrilha.filter((t) => t.feita).length} de {daTrilha.length}</span>}
+              {atrasadas > 0 && <a href={link('semana')} style={{ color: 'var(--ink)' }}>{atrasadas} {atrasadas === 1 ? 'tarefa atrasada' : 'tarefas atrasadas'} na Semana</a>}
               {deOntem.length > 0 && (
                 <span>
                   Ontem: {deOntem.length} {deOntem.length === 1 ? 'tarefa' : 'tarefas'}, {fmtMin(deOntem.reduce((s, t) => s + (t.chEfetivaMin ?? 0), 0))}

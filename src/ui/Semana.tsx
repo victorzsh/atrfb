@@ -1,49 +1,58 @@
 import { useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Tarefa } from '../data/model';
-import { dataCurta, diaCurto, fixada, fmtMin, hoje, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias } from '../data/logica';
+import { aPlanejar, atrasada, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, minutosDisponiveis, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
+import { EditorAgenda, PainelEncaixe } from './Agenda';
 import { Shell } from './Shell';
 import { link } from './rota';
+
+const FORA = 'a-planejar';
 
 export function Semana() {
   const d = useDados();
   const { alterar } = useLoja();
   const [desloc, setDesloc] = useState(0);
   const [sel, setSel] = useState<string | null>(null);
-  const [arrastando, setArrastando] = useState<{ key: string; dia: string } | null>(null);
+  const [arrastando, setArrastando] = useState<{ key: string; dia: string | null } | null>(null);
   const [alvo, setAlvo] = useState<string | null>(null);
+  const [painel, setPainel] = useState<'agenda' | 'encaixe' | null>(null);
 
   const h = hoje();
   const inicio = somarDias(segundaDaSemana(h), desloc * 7);
   const fim = somarDias(inicio, 6);
   const dias = plano(d, inicio, fim);
-  const atual = d.sessao?.tarefaKey ?? [...plano(d, h, h).values()].flat().find((t) => !t.feita)?.key;
+  const soltas = aPlanejar(d);
   const selecionada = sel ? d.tarefas.find((t) => t.key === sel && !t.feita) : undefined;
-  const temFixadas = d.tarefas.some((t) => fixada(t, h));
+  const atual = d.sessao?.tarefaKey;
 
   let feitoMin = 0;
   let planejadoMin = 0;
+  let planejadas = 0;
   for (const ts of dias.values())
     for (const t of ts) {
       if (t.feita) feitoMin += t.chEfetivaMin ?? 0;
+      else planejadas++;
       planejadoMin += t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin;
     }
-  const ultimo = [...dias.entries()].filter(([, ts]) => ts.some((t) => !t.feita)).pop();
-  const restantes = d.tarefas.filter((t) => !t.feita).length - [...dias.values()].flat().filter((t) => !t.feita).length;
+  const atrasadas = d.tarefas.filter((t) => atrasada(t, h)).length;
+  const pendentesNaSemana = [...dias.values()].flat().filter((t) => !t.feita);
 
   const mover = (t: Tarefa, dia: string | null) => {
+    // O bloco arrastado muda de coluna e o navegador nem sempre avisa o fim do arrasto.
+    setArrastando(null);
+    setAlvo(null);
     if (dia !== null && dia < h) return;
-    alterar(dia ? `${rotulo(t)} planejada para ${diaCurto(dia)} ${dataCurta(dia)}` : `${rotulo(t)} volta ao automático`, (x) => {
-      x.tarefas.find((y) => y.key === t.key)!.plano = dia;
+    if ((t.plano ?? null) === dia) return setSel(null);
+    alterar(dia ? `${rotulo(t)} planejada para ${diaCurto(dia)} ${dataCurta(dia)}` : `${rotulo(t)} sem dia`, (x) => {
+      Object.assign(x.tarefas.find((y) => y.key === t.key)!, { plano: dia, hora: null });
     });
     setSel(null);
   };
 
-  const soltar = (dia: string) => (e: React.DragEvent) => {
+  const soltarEm = (dia: string | null) => (e: React.DragEvent) => {
     e.preventDefault();
     setAlvo(null);
-    const key = e.dataTransfer.getData('text/plain');
-    const t = d.tarefas.find((x) => x.key === key);
+    const t = d.tarefas.find((x) => x.key === e.dataTransfer.getData('text/plain'));
     if (t) mover(t, dia);
   };
 
@@ -52,68 +61,101 @@ export function Semana() {
     setAlvo(null);
     const t = arrastando ? d.tarefas.find((x) => x.key === arrastando.key) : undefined;
     if (!t || !arrastando) return;
-    const dia = somarDias(arrastando.dia, delta * 7);
+    const dia = somarDias(arrastando.dia && arrastando.dia >= h ? arrastando.dia : h, delta * 7);
     mover(t, dia < h ? h : dia);
     setDesloc(desloc + delta);
   };
 
-  const limpar = () => {
-    if (!confirm('Tirar todas as tarefas dos dias em que você as colocou? Elas voltam a seguir a ordem da trilha.')) return;
-    alterar('Planejamento da semana limpo', (x) => {
-      for (const t of x.tarefas) t.plano = null;
+  const zona = (id: string, aceita: boolean, aoSoltar: (e: React.DragEvent) => void) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!aceita || !arrastando) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (alvo !== id) setAlvo(id);
+    },
+    onDragLeave: () => setAlvo((a) => (a === id ? null : a)),
+    onDrop: aoSoltar,
+  });
+
+  const limparSemana = () => {
+    if (!confirm(`Tirar as ${pendentesNaSemana.length} tarefas pendentes desta semana? Elas voltam para “A planejar”.`)) return;
+    const keys = new Set(pendentesNaSemana.map((t) => t.key));
+    alterar(`Semana de ${dataCurta(inicio)} limpa`, (x) => {
+      for (const t of x.tarefas) if (keys.has(t.key)) Object.assign(t, { plano: null, hora: null });
     });
   };
 
-  const arrastavel = (dia: string) => ({
-    onDragOver: (e: React.DragEvent) => {
-      if (dia < h || !arrastando) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (alvo !== dia) setAlvo(dia);
-    },
-    onDragLeave: () => setAlvo((a) => (a === dia ? null : a)),
-    onDrop: soltar(dia),
-  });
+  const bloco = (t: Tarefa, dia: string | null, compacto?: boolean) => (
+    <button
+      key={t.key}
+      type="button"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', t.key);
+        e.dataTransfer.effectAllowed = 'move';
+        setArrastando({ key: t.key, dia });
+        setSel(null);
+      }}
+      onDragEnd={() => {
+        setArrastando(null);
+        setAlvo(null);
+      }}
+      onClick={() => setSel(sel === t.key ? null : t.key)}
+      className={`bloco movel${compacto ? ' compacto' : ''}${t.key === atual ? ' agora' : ''}${sel === t.key ? ' sel' : ''}${arrastando?.key === t.key ? ' fantasma' : ''}`}
+      aria-pressed={sel === t.key}
+      aria-label={`${rotulo(t)}, ${nomeDisciplina(d, t)}. Arraste para um dia ou clique para mover.`}
+      title={t.descricao}
+    >
+      <span className="mono" style={{ fontSize: 11, display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '2px 6px' }}>
+        <span style={{ whiteSpace: 'nowrap' }}>{t.hora && dia ? `${t.hora}–${hhmm(minDe(t.hora) + t.chMin)}` : `${rotulo(t)} · ${fmtMin(t.chMin)}`}</span>
+        {t.hora && dia && <span style={{ whiteSpace: 'nowrap' }}>{rotulo(t)}</span>}
+        {atrasada(t, h) && <span style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>atrasada</span>}
+      </span>
+      <span style={{ fontSize: compacto ? 13 : 14, fontWeight: 500, lineHeight: 1.2 }}>{nomeDisciplina(d, t)}</span>
+    </button>
+  );
 
   return (
     <Shell secao="semana">
-      <div className="miolo" style={{ paddingBottom: selecionada ? 140 : undefined }}>
+      <div className="miolo" style={{ paddingBottom: selecionada ? 160 : undefined }}>
         <section className="cabeca">
           <span className="numerao">{fmtMin(feitoMin)}<small>/{fmtMin(planejadoMin)}</small></span>
           <p>
-            de {dataCurta(inicio)} a {dataCurta(fim)}. Com {fmtMin(d.minutosPorDia)} por dia
-            {ultimo ? `, você chega à ${rotulo(ultimo[1][ultimo[1].length - 1])} na ${diaCurto(ultimo[0])}` : ''}
-            {restantes > 0 ? `; ficam ${restantes} tarefas para depois.` : '.'}
+            de {dataCurta(inicio)} a {dataCurta(fim)}: {planejadas} {planejadas === 1 ? 'tarefa planejada' : 'tarefas planejadas'}
+            {atrasadas > 0 ? `, ${atrasadas} ${atrasadas === 1 ? 'atrasada' : 'atrasadas'} no total` : ''}. {soltas.length} ainda sem dia.
           </p>
           <div className="fim" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
             <div className="grupo-seg mono" role="group" aria-label="Semana">
-              <button type="button" className={alvo === 'antes' ? 'on' : ''} onClick={() => setDesloc(desloc - 1)} aria-label="Semana anterior"
-                onDragOver={(e) => { if (arrastando) { e.preventDefault(); setAlvo('antes'); } }} onDragLeave={() => setAlvo(null)} onDrop={soltarSemana(-1)}>←</button>
+              <button type="button" className={alvo === 'antes' ? 'on' : ''} onClick={() => setDesloc(desloc - 1)} aria-label="Semana anterior" {...zona('antes', true, soltarSemana(-1))}>←</button>
               <button type="button" className={desloc === 0 ? 'on' : ''} onClick={() => setDesloc(0)}>ESTA SEMANA</button>
-              <button type="button" className={alvo === 'depois' ? 'on' : ''} onClick={() => setDesloc(desloc + 1)} aria-label="Próxima semana"
-                onDragOver={(e) => { if (arrastando) { e.preventDefault(); setAlvo('depois'); } }} onDragLeave={() => setAlvo(null)} onDrop={soltarSemana(1)}>→</button>
+              <button type="button" className={alvo === 'depois' ? 'on' : ''} onClick={() => setDesloc(desloc + 1)} aria-label="Próxima semana" {...zona('depois', true, soltarSemana(1))}>→</button>
             </div>
-            {temFixadas && <button type="button" className="btn btn-texto btn-peq" onClick={limpar}>Voltar tudo ao automático</button>}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" className={`btn btn-peq ${painel === 'agenda' ? 'btn-ink' : 'btn-linha'}`} onClick={() => setPainel(painel === 'agenda' ? null : 'agenda')}>Minha agenda</button>
+              <button type="button" className={`btn btn-peq ${painel === 'encaixe' ? 'btn-ink' : 'btn-linha'}`} onClick={() => setPainel(painel === 'encaixe' ? null : 'encaixe')}>Encaixar na agenda</button>
+            </div>
+            {pendentesNaSemana.length > 0 && <button type="button" className="btn btn-texto btn-peq" onClick={limparSemana}>Tirar tudo desta semana</button>}
           </div>
         </section>
+
+        {painel === 'agenda' && <EditorAgenda fechar={() => setPainel(null)} />}
+        {painel === 'encaixe' && <PainelEncaixe desdeSugerido={inicio > h ? inicio : h} abrirAgenda={() => setPainel('agenda')} />}
 
         <div className="tab-rolagem">
           <div className="semana">
             {[...dias.entries()].map(([dia, ts]) => {
-              const feito = ts.reduce((s, t) => s + (t.feita ? t.chEfetivaMin ?? 0 : 0), 0);
-              const previsto = ts.reduce((s, t) => s + (t.feita ? 0 : t.chMin), 0);
-              const total = dia < h ? feito : feito + previsto;
-              const acima = dia >= h && total > d.minutosPorDia + 15;
+              const total = ts.reduce((s, t) => s + (t.feita ? t.chEfetivaMin ?? 0 : t.chMin), 0);
               const aberto = dia >= h;
+              const disponivel = aberto ? minutosDisponiveis(d, dia) : 0;
               return (
-                <section key={dia} className={`dia${alvo === dia ? ' alvo' : ''}${aberto ? '' : ' passado'}`} {...arrastavel(dia)}>
+                <section key={dia} className={`dia${alvo === dia ? ' alvo' : ''}`} {...zona(dia, aberto, soltarEm(dia))}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: '1px solid var(--ink)', paddingBottom: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 20, fontWeight: dia === h ? 600 : 500, letterSpacing: '-.02em', textTransform: 'capitalize' }}>{diaCurto(dia)} {dataCurta(dia).split(' ')[0]}</span>
-                    <span className="mono" style={{ fontSize: 11, color: acima ? 'var(--ink)' : 'var(--muted)', fontWeight: acima ? 600 : 400 }} title={acima ? `Acima da meta de ${fmtMin(d.minutosPorDia)}` : undefined}>
-                      {fmtMin(total)}{acima ? ' · acima' : ''}
+                    <span className="mono muted" style={{ fontSize: 11 }} title={disponivel ? `${fmtMin(total)} planejadas de ${fmtMin(disponivel)} na sua agenda` : undefined}>
+                      {disponivel ? `${fmtMin(total)}/${fmtMin(disponivel)}` : fmtMin(total)}
                     </span>
                   </div>
-                  {ts.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{aberto ? 'livre' : 'sem estudo'}</span>}
+                  {ts.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{!aberto ? 'sem estudo' : disponivel || !d.agenda ? 'livre' : 'folga'}</span>}
                   {ts.map((t) =>
                     t.feita ? (
                       <a key={t.key} href={link('ciclo/' + t.key)} className="bloco feito">
@@ -121,34 +163,10 @@ export function Semana() {
                         <span style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.2 }}>{nomeDisciplina(d, t)}</span>
                       </a>
                     ) : (
-                      <button
-                        key={t.key}
-                        type="button"
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', t.key);
-                          e.dataTransfer.effectAllowed = 'move';
-                          setArrastando({ key: t.key, dia });
-                          setSel(null);
-                        }}
-                        onDragEnd={() => {
-                          setArrastando(null);
-                          setAlvo(null);
-                        }}
-                        onClick={() => setSel(sel === t.key ? null : t.key)}
-                        className={`bloco movel${t.key === atual ? ' agora' : ''}${sel === t.key ? ' sel' : ''}${arrastando?.key === t.key ? ' fantasma' : ''}`}
-                        aria-pressed={sel === t.key}
-                        aria-label={`${rotulo(t)}, ${nomeDisciplina(d, t)}. Arraste para outro dia ou clique para mover.`}
-                      >
-                        <span className="mono" style={{ fontSize: 11, display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '2px 6px' }}>
-                          <span style={{ whiteSpace: 'nowrap' }}>{rotulo(t)} · {fmtMin(t.chMin)}</span>
-                          {fixada(t, h) && <span style={{ whiteSpace: 'nowrap', color: 'var(--muted)' }} title="Você colocou esta tarefa neste dia">fixada</span>}
-                        </span>
-                        <span style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.2, textAlign: 'left' }}>{nomeDisciplina(d, t)}</span>
-                      </button>
+                      bloco(t, dia)
                     ),
                   )}
-                  {selecionada && aberto && !ts.some((t) => t.key === selecionada.key) && (
+                  {selecionada && aberto && selecionada.plano !== dia && (
                     <button type="button" className="bloco destino" onClick={() => mover(selecionada, dia)}>
                       Mover {rotulo(selecionada)} para cá
                     </button>
@@ -158,20 +176,40 @@ export function Semana() {
             })}
           </div>
         </div>
-        <p className="mono muted" style={{ margin: 0, fontSize: 11, lineHeight: 1.7 }}>
-          Arraste uma tarefa para outro dia (ou para ← → para mudar de semana). No celular, toque na tarefa e depois no dia.
-          O que você não mexer segue a ordem da trilha pela meta diária, que muda em Dados.
-        </p>
+
+        <section aria-label="A planejar" className={`a-planejar${alvo === FORA ? ' alvo' : ''}`} {...zona(FORA, true, soltarEm(null))}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '8px 20px', borderBottom: '2px solid var(--ink)', paddingBottom: 12 }}>
+            <h2 className="sub" style={{ fontSize: 24 }}>A planejar</h2>
+            <span className="muted" style={{ fontSize: 14 }}>
+              {soltas.length ? 'Arraste para um dia acima (no celular: toque na tarefa e depois no dia). Solte aqui para tirar uma tarefa do dia.' : 'Todas as tarefas pendentes já têm dia.'}
+            </span>
+            {selecionada?.plano && (
+              <button type="button" className="btn btn-linha btn-peq" style={{ marginLeft: 'auto' }} onClick={() => mover(selecionada, null)}>
+                Tirar {rotulo(selecionada)} do dia
+              </button>
+            )}
+          </div>
+          {trilhas(d).map((n) => {
+            const ts = soltas.filter((t) => t.trilha === n);
+            if (!ts.length) return null;
+            return (
+              <div key={n} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span className="rotulo">Trilha {n} · {ts.length} {ts.length === 1 ? 'tarefa' : 'tarefas'}</span>
+                <div className="soltas">{ts.map((t) => bloco(t, null, true))}</div>
+              </div>
+            );
+          })}
+        </section>
       </div>
 
       {selecionada && (
         <div className="barra-mover" role="region" aria-label="Mover tarefa">
           <span style={{ fontWeight: 600 }}>{rotulo(selecionada)} · {nomeDisciplina(d, selecionada)}</span>
-          <span className="muted" style={{ fontSize: 13 }}>Toque no dia de destino; use ← → para outras semanas.</span>
+          <span className="muted" style={{ fontSize: 13 }}>Toque em “Mover para cá” no dia; use ← → para outras semanas.</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginLeft: 'auto' }}>
             <button type="button" className="btn btn-linha btn-peq" onClick={() => setDesloc(desloc - 1)} aria-label="Semana anterior">←</button>
             <button type="button" className="btn btn-linha btn-peq" onClick={() => setDesloc(desloc + 1)} aria-label="Próxima semana">→</button>
-            {fixada(selecionada, h) && <button type="button" className="btn btn-linha btn-peq" onClick={() => mover(selecionada, null)}>Voltar ao automático</button>}
+            {selecionada.plano && <button type="button" className="btn btn-linha btn-peq" onClick={() => mover(selecionada, null)}>Tirar do dia</button>}
             <a className="btn btn-texto btn-peq" href={link('ciclo/' + selecionada.key)}>Abrir</a>
             <button type="button" className="btn btn-texto btn-peq" onClick={() => setSel(null)}>Fechar</button>
           </div>

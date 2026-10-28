@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useDados, useLoja } from '../data/store';
-import { disciplinaDaTarefa, ehRevisao, fmtMin, hoje, lerMin, nomeDisciplina, pct, planoDeHoje, proximaAula, rotulo, tarefa, ordenadas } from '../data/logica';
+import { disciplinaDaTarefa, ehRevisao, fmtMin, hoje, lerMin, nomeDisciplina, pct, planoDeHoje, proximaAula, rotulo, tarefa } from '../data/logica';
 import { decorrido } from './Agora';
 import { Shell } from './Shell';
 import { ir, link } from './rota';
@@ -33,8 +33,9 @@ export function Registro({ tarefaKey }: { tarefaKey: string }) {
   const minutos = lerMin(tempo);
   const p = pct(a, q);
   const proposta = t.chMin;
-  const seguinte = ordenadas(d).find((x) => !x.feita && x.key !== t.key);
-  const continuarHoje = seguinte && planoDeHoje(d).some((x) => x.key === seguinte.key);
+  // A próxima só se você a planejou para hoje.
+  const seguinte = planoDeHoje(d).find((x) => !x.feita && x.key !== t.key);
+  const continuarHoje = !!seguinte;
 
   const salvar = async (depois: 'seguir' | 'parar') => {
     if (minutos === null) return;

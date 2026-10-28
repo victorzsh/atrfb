@@ -1,4 +1,4 @@
-import type { Dados, Disciplina, Tarefa } from './model';
+import type { Dados, Disciplina, Intervalo, Tarefa } from './model';
 import { normalizar } from './model';
 import type { Leitura } from '../xlsx/planilha';
 
@@ -122,43 +122,127 @@ export function proximaAula(disc: Disciplina): number | null {
   return disc.aulas.find((a) => !a.tr)?.n ?? null;
 }
 
-// Plano da semana: as tarefas feitas ficam no dia em que foram feitas; as que
-// você arrastou para um dia ficam nele; o resto segue a ordem da trilha,
-// preenchendo cada dia até a meta diária, a partir de hoje.
-export function fixada(t: Tarefa, h = hoje()): boolean {
-  return !t.feita && !!t.plano && t.plano >= h;
-}
-
+// Plano da semana: só o que você decidiu. A tarefa feita fica no dia em que
+// foi feita; a pendente fica no dia em que você a colocou. Nada é distribuído
+// sozinho: o que não tem dia fica em "A planejar".
 export function plano(d: Dados, desde: string, ate: string): Map<string, Tarefa[]> {
   const dias = new Map<string, Tarefa[]>();
   for (let x = desde; x <= ate; x = somarDias(x, 1)) dias.set(x, []);
-  const h = hoje();
-  const ord = ordenadas(d);
-  const pos = new Map(ord.map((t, i) => [t.key, i]));
-
-  const fixas = new Map<string, number>();
-  for (const t of ord) {
-    if (t.feita && t.data && dias.has(t.data)) dias.get(t.data)!.push(t);
-    if (fixada(t, h)) {
-      fixas.set(t.plano!, (fixas.get(t.plano!) ?? 0) + t.chMin);
-      dias.get(t.plano!)?.push(t);
-    }
+  for (const t of ordenadas(d)) {
+    const dia = t.feita ? t.data : t.plano;
+    if (dia) dias.get(dia)?.push(t);
   }
-
-  let dia = h;
-  let usado = ord.filter((t) => t.feita && t.data === h).reduce((s, t) => s + (t.chEfetivaMin ?? t.chMin), 0) + (fixas.get(h) ?? 0);
-  for (const t of ord) {
-    if (t.feita || fixada(t, h)) continue;
-    for (let guarda = 0; usado > 0 && usado + t.chMin > d.minutosPorDia + 15 && guarda < 3650; guarda++) {
-      dia = somarDias(dia, 1);
-      usado = fixas.get(dia) ?? 0;
-    }
-    if (dia > ate) break;
-    dias.get(dia)?.push(t);
-    usado += t.chMin;
+  // Dentro do dia: primeiro as que têm horário, pela hora; depois as outras, na ordem da trilha.
+  for (const ts of dias.values()) {
+    const ordem = new Map(ts.map((t, i) => [t.key, i]));
+    ts.sort((a, b) => {
+      const ha = !a.feita && a.hora ? minDe(a.hora) : Infinity;
+      const hb = !b.feita && b.hora ? minDe(b.hora) : Infinity;
+      return ha - hb || ordem.get(a.key)! - ordem.get(b.key)!;
+    });
   }
-  for (const ts of dias.values()) ts.sort((a, b) => pos.get(a.key)! - pos.get(b.key)!);
   return dias;
+}
+
+// ---------- agenda ----------
+
+export const DIAS_SEMANA = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+
+export function minDe(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+
+export function hhmm(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+
+export function diaDaSemana(iso: string): number {
+  return (deIso(iso).getDay() + 6) % 7; // 0 = segunda
+}
+
+export function intervalosDoDia(d: Dados, iso: string): Intervalo[] {
+  return [...(d.agenda?.[diaDaSemana(iso)] ?? [])].filter((i) => minDe(i.fim) > minDe(i.inicio)).sort((a, b) => minDe(a.inicio) - minDe(b.inicio));
+}
+
+export function minutosDisponiveis(d: Dados, iso: string): number {
+  return intervalosDoDia(d, iso).reduce((s, i) => s + minDe(i.fim) - minDe(i.inicio), 0);
+}
+
+export function temAgenda(d: Dados): boolean {
+  return (d.agenda ?? []).some((dia) => dia.some((i) => minDe(i.fim) > minDe(i.inicio)));
+}
+
+interface Vao {
+  ini: number;
+  fim: number;
+}
+
+// Tira um trecho [a, b) dos vãos livres.
+function ocupar(vaos: Vao[], a: number, b: number): Vao[] {
+  const out: Vao[] = [];
+  for (const v of vaos) {
+    if (b <= v.ini || a >= v.fim) out.push(v);
+    else {
+      if (a > v.ini) out.push({ ini: v.ini, fim: a });
+      if (b < v.fim) out.push({ ini: b, fim: v.fim });
+    }
+  }
+  return out;
+}
+
+export interface Encaixe {
+  colocadas: { key: string; dia: string; hora: string }[];
+  semEspaco: string[];
+}
+
+// Encaixa as tarefas pedidas, na ordem dada, nos horários livres da agenda a
+// partir de `desde`. Não mexe em nenhuma tarefa que já tem dia: os horários
+// delas contam como ocupados. Hoje, só depois de `agoraMin`.
+export function encaixar(d: Dados, keys: string[], desde: string, agoraMin: number | null = null, h = hoje()): Encaixe {
+  const res: Encaixe = { colocadas: [], semEspaco: [] };
+  const maiorJanela = Math.max(0, ...(d.agenda ?? []).flat().map((i) => minDe(i.fim) - minDe(i.inicio)));
+  const fila = keys.map((k) => d.tarefas.find((t) => t.key === k)).filter((t): t is Tarefa => !!t && !t.feita);
+  const cabem = fila.filter((t) => t.chMin <= maiorJanela);
+  res.semEspaco = fila.filter((t) => t.chMin > maiorJanela).map((t) => t.key);
+  if (!cabem.length) return res;
+
+  let i = 0;
+  for (let dia = desde < h ? h : desde, n = 0; i < cabem.length && n < 730; dia = somarDias(dia, 1), n++) {
+    let vaos: Vao[] = intervalosDoDia(d, dia).map((x) => ({ ini: minDe(x.inicio), fim: minDe(x.fim) }));
+    if (!vaos.length) continue;
+    if (dia === h && agoraMin !== null) vaos = ocupar(vaos, 0, agoraMin);
+    // O que você já colocou neste dia ocupa o horário dele (ou, sem horário, o começo do dia).
+    const doDia = d.tarefas.filter((t) => !t.feita && t.plano === dia && !keys.includes(t.key));
+    for (const t of doDia.filter((x) => x.hora)) vaos = ocupar(vaos, minDe(t.hora!), minDe(t.hora!) + t.chMin);
+    for (const t of doDia.filter((x) => !x.hora)) {
+      let resta = t.chMin;
+      while (resta > 0 && vaos.length) {
+        const v = vaos[0];
+        const usa = Math.min(resta, v.fim - v.ini);
+        vaos = ocupar(vaos, v.ini, v.ini + usa);
+        resta -= usa;
+      }
+    }
+    while (i < cabem.length) {
+      const t = cabem[i];
+      const v = vaos.find((x) => x.fim - x.ini >= t.chMin);
+      if (!v) break; // a ordem da trilha vale: a próxima espera o próximo dia
+      res.colocadas.push({ key: t.key, dia, hora: hhmm(v.ini) });
+      vaos = ocupar(vaos, v.ini, v.ini + t.chMin);
+      i++;
+    }
+  }
+  res.semEspaco.push(...cabem.slice(i).map((t) => t.key));
+  return res;
+}
+
+export function aPlanejar(d: Dados): Tarefa[] {
+  return ordenadas(d).filter((t) => !t.feita && !t.plano);
+}
+
+export function atrasada(t: Tarefa, h = hoje()): boolean {
+  return !t.feita && !!t.plano && t.plano < h;
 }
 
 export function planoDeHoje(d: Dados): Tarefa[] {
