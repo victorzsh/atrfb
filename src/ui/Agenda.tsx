@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Intervalo } from '../data/model';
-import { aPlanejar, dataCurta, deIso, diaCurto, DIAS_SEMANA, encaixar, fmtMin, hhmm, hoje, minDe, rotulo, temAgenda, trilhas } from '../data/logica';
+import { aPlanejar, aReplanejar, atrasada, dataCurta, deIso, diaCurto, DIAS_SEMANA, encaixar, fmtMin, hhmm, hoje, minDe, replanejar, rotulo, somarDias, temAgenda, trilhas } from '../data/logica';
 
 const vazia = (): Intervalo[][] => Array.from({ length: 7 }, () => []);
 
 // Os horários de estudo de cada dia da semana. Dia sem horário é folga.
-export function EditorAgenda({ fechar }: { fechar: () => void }) {
+export function EditorAgenda({ fechar, salva }: { fechar: () => void; salva?: () => void }) {
   const d = useDados();
   const { alterar } = useLoja();
   const [agenda, setAgenda] = useState<Intervalo[][]>(() => structuredClone(d.agenda ?? vazia()));
@@ -27,7 +27,9 @@ export function EditorAgenda({ fechar }: { fechar: () => void }) {
     alterar('Agenda de estudo atualizada', (x) => {
       x.agenda = agenda.map((xs) => [...xs].sort((a, b) => minDe(a.inicio) - minDe(b.inicio)));
     });
-    fechar();
+    // Com tarefas já planejadas, elas continuam nos horários antigos: oferece replanejar.
+    if (salva && aReplanejar(d, hoje(), false).length) salva();
+    else fechar();
   };
 
   return (
@@ -152,6 +154,160 @@ export function PainelEncaixe({ desdeSugerido, abrirAgenda }: { desdeSugerido: s
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
           <span className="ok-txt">{ultimo.msg}</span>
           {ultimo.keys.length > 0 && <button type="button" className="btn btn-linha btn-peq" onClick={desfazer}>Desfazer</button>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const agoraMin = () => {
+  const a = new Date();
+  return a.getHours() * 60 + a.getMinutes();
+};
+
+// Para quando a rotina muda no meio do caminho: reorganiza só o que ainda está
+// por fazer, a partir de uma data, nos horários atuais. O que você concluiu,
+// e o que está antes dessa data, fica exatamente onde está.
+export function PainelReplanejar({ aviso, abrirAgenda }: { aviso?: boolean; abrirAgenda: () => void }) {
+  const d = useDados();
+  const { alterar } = useLoja();
+  const h = hoje();
+  const [desde, setDesde] = useState(h);
+  const [comAtrasadas, setComAtrasadas] = useState(false);
+  const [folgaDe, setFolgaDe] = useState(h);
+  const [folgaAte, setFolgaAte] = useState(h);
+  const [ultimo, setUltimo] = useState<{ antes: { key: string; plano: string | null; hora: string | null }[]; msg: string } | null>(null);
+
+  const alvo = aReplanejar(d, desde, comAtrasadas, h);
+  const nAtrasadas = d.tarefas.filter((t) => atrasada(t, h)).length;
+  const feitas = d.tarefas.filter((t) => t.feita).length;
+  const folgas = [...(d.folgas ?? [])].filter((x) => x >= h).sort();
+  const fimAntes = alvo.reduce((m, t) => (t.plano! > m ? t.plano! : m), '');
+
+  const fazer = () => {
+    const r = replanejar(d, desde, comAtrasadas, desde <= h ? agoraMin() : null, h);
+    alterar(`Replanejado a partir de ${dataCurta(desde)} (${r.colocadas.length} tarefas)`, (x) => {
+      const pos = new Map(r.colocadas.map((c) => [c.key, c]));
+      for (const a of r.antes) {
+        const c = pos.get(a.key);
+        Object.assign(x.tarefas.find((t) => t.key === a.key)!, c ? { plano: c.dia, hora: c.hora } : { plano: null, hora: null });
+      }
+    });
+    const u = r.colocadas.length ? r.colocadas[r.colocadas.length - 1].dia : null;
+    const fora = r.semEspaco.map((k) => rotulo(d.tarefas.find((t) => t.key === k)!));
+    setUltimo({
+      antes: r.antes,
+      msg: (r.colocadas.length
+        ? `${r.colocadas.length} ${r.colocadas.length === 1 ? 'tarefa reorganizada' : 'tarefas reorganizadas'}. Agora o plano vai até ${diaCurto(u!)} ${dataCurta(u!)} ${deIso(u!).getFullYear()}` +
+          (fimAntes ? ` (antes: ${diaCurto(fimAntes)} ${dataCurta(fimAntes)}).` : '.')
+        : 'Nenhuma tarefa coube nos horários.') +
+        (fora.length ? ` Voltaram para "A planejar" por não caber em nenhum horário: ${fora.join(', ')}.` : ''),
+    });
+  };
+
+  const desfazer = () => {
+    if (!ultimo) return;
+    alterar('Replanejamento desfeito', (x) => {
+      for (const a of ultimo.antes) {
+        const t = x.tarefas.find((y) => y.key === a.key);
+        if (t && !t.feita) Object.assign(t, { plano: a.plano, hora: a.hora });
+      }
+    });
+    setUltimo(null);
+  };
+
+  const marcarFolga = () => {
+    const ate = folgaAte < folgaDe ? folgaDe : folgaAte;
+    alterar(`Sem estudo de ${dataCurta(folgaDe)} a ${dataCurta(ate)}`, (x) => {
+      const s = new Set(x.folgas ?? []);
+      for (let dia = folgaDe; dia <= ate; dia = somarDias(dia, 1)) s.add(dia);
+      x.folgas = [...s].filter((y) => y >= h).sort();
+    });
+    if (folgaDe < desde || !alvo.length) setDesde(folgaDe);
+  };
+
+  const tirarFolga = (dia: string) => alterar(`${dataCurta(dia)} volta a ter estudo`, (x) => {
+    x.folgas = (x.folgas ?? []).filter((y) => y !== dia);
+  });
+
+  if (!temAgenda(d)) {
+    return (
+      <section style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, border: '1px solid var(--ink)', padding: 24 }}>
+        <span style={{ fontSize: 15 }}>Para replanejar, defina primeiro os horários em que você estuda em cada dia.</span>
+        <button type="button" className="btn btn-ink btn-peq" onClick={abrirAgenda}>Definir minha agenda</button>
+      </section>
+    );
+  }
+
+  return (
+    <section aria-label="Replanejar" style={{ display: 'flex', flexDirection: 'column', gap: 20, border: '1px solid var(--ink)', padding: 24 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '8px 20px' }}>
+        <h2 className="sub" style={{ fontSize: 24 }}>Replanejar</h2>
+        <span className="muted" style={{ fontSize: 14 }}>
+          Para quando a rotina muda. Reorganiza o que ainda falta nos seus horários de agora, na mesma ordem em que estava.
+          {feitas > 0 && ` As ${feitas} tarefas concluídas não mudam.`}
+        </span>
+      </div>
+      {aviso && (
+        <p style={{ margin: 0, fontSize: 15, borderLeft: '4px solid var(--mark)', paddingLeft: 12 }}>
+          Agenda nova salva. As tarefas que você já tinha planejado continuam nos horários antigos até você replanejar.
+        </p>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <span className="campo-rotulo" style={{ display: 'block' }}>1 · TEVE UM IMPREVISTO? MARQUE OS DIAS SEM ESTUDO (OPCIONAL)</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 16px', alignItems: 'flex-end' }}>
+          <label className="campo-rotulo">
+            DE
+            <input type="date" className="campo" style={{ width: 'auto' }} value={folgaDe} min={h} onChange={(e) => { const v = e.target.value < h ? h : e.target.value; setFolgaDe(v); if (folgaAte < v) setFolgaAte(v); }} />
+          </label>
+          <label className="campo-rotulo">
+            ATÉ
+            <input type="date" className="campo" style={{ width: 'auto' }} value={folgaAte} min={folgaDe} onChange={(e) => setFolgaAte(e.target.value)} />
+          </label>
+          <button type="button" className="btn btn-linha btn-peq" onClick={marcarFolga}>Marcar sem estudo</button>
+        </div>
+        {folgas.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {folgas.map((f) => (
+              <span key={f} className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, border: '1px solid var(--line)', padding: '4px 4px 4px 10px' }}>
+                {diaCurto(f)} {dataCurta(f)}
+                <button type="button" className="btn-texto" aria-label={`Voltar a estudar em ${dataCurta(f)}`} onClick={() => tirarFolga(f)} style={{ fontSize: 16, color: 'var(--muted)', padding: '0 4px' }}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <span className="campo-rotulo" style={{ display: 'block' }}>2 · REORGANIZAR O QUE FALTA</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px', alignItems: 'flex-end' }}>
+          <label className="campo-rotulo">
+            A PARTIR DE
+            <input type="date" className="campo" style={{ width: 'auto' }} value={desde} min={h} onChange={(e) => setDesde(e.target.value < h ? h : e.target.value)} />
+          </label>
+          {nAtrasadas > 0 && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, paddingBottom: 10 }}>
+              <input type="checkbox" checked={comAtrasadas} onChange={(e) => setComAtrasadas(e.target.checked)} style={{ width: 18, height: 18, margin: 0, accentColor: 'var(--ink)' }} />
+              incluir as {nAtrasadas} atrasadas
+            </label>
+          )}
+          <button type="button" className="btn btn-ink" disabled={!alvo.length} onClick={fazer}>
+            Replanejar {alvo.length} {alvo.length === 1 ? 'tarefa' : 'tarefas'}
+          </button>
+          <button type="button" className="btn btn-texto btn-peq" onClick={abrirAgenda}>Ver minha agenda</button>
+        </div>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {alvo.length
+            ? `Entram as tarefas pendentes planejadas de ${diaCurto(desde)} ${dataCurta(desde)} em diante${comAtrasadas ? ' e as atrasadas' : ''}. ${desde === h ? 'Hoje, só depois de agora. ' : ''}O que está antes disso fica onde está.`
+            : `Nenhuma tarefa pendente planejada de ${dataCurta(desde)} em diante.`}
+        </span>
+      </div>
+
+      {ultimo && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+          <span className="ok-txt">{ultimo.msg}</span>
+          <button type="button" className="btn btn-linha btn-peq" onClick={desfazer}>Desfazer</button>
         </div>
       )}
     </section>

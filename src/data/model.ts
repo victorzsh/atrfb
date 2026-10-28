@@ -58,6 +58,7 @@ export interface Dados {
   atualizadoEm: string;
   minutosPorDia: number; // não usado mais; mantido para dados antigos
   agenda?: Intervalo[][]; // 7 dias, 0 = segunda
+  folgas?: string[]; // datas sem estudo por imprevisto ("2026-11-03")
   disciplinas: Disciplina[];
   tarefas: Tarefa[];
   sessao: Sessao | null;

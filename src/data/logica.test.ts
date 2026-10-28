@@ -1,5 +1,5 @@
 import type { Dados, Tarefa } from './model';
-import { aPlanejar, atrasada, encaixar, hoje, plano, somarDias } from './logica';
+import { aPlanejar, atrasada, encaixar, hoje, plano, replanejar, somarDias } from './logica';
 
 function tarefa(n: number, extra: Partial<Tarefa> = {}): Tarefa {
   return { key: `1:${n}`, trilha: 1, num: n, disciplina: 'PORTUGUÊS', descricao: '', chMin: 90, feita: false, data: null, chEfetivaMin: null, questoes: null, acertos: null, row: n, ...extra };
@@ -72,5 +72,42 @@ describe('encaixe na agenda', () => {
   it('avisa o que não cabe em nenhum horário', () => {
     const d = base([tarefa(1, { chMin: 240 })]);
     expect(encaixar(d, ['1:1'], seg, null, seg).semEspaco).toEqual(['1:1']);
+  });
+});
+
+describe('replanejar depois de um imprevisto', () => {
+  const seg = '2026-11-02';
+  const qua = '2026-11-04';
+  const manha = [{ inicio: '08:00', fim: '11:00' }];
+  const tarde = [{ inicio: '14:00', fim: '15:30' }];
+  const semana = (dia: typeof manha) => [dia, dia, dia, dia, dia, [], []];
+
+  it('concluídas e o que vem antes da data não mudam; o resto vai para os horários novos, na mesma ordem', () => {
+    const d = { ...dados([
+      tarefa(1, { feita: true, data: seg }),
+      tarefa(2, { plano: seg, hora: '09:30' }),
+      tarefa(3, { plano: qua, hora: '08:00' }),
+      tarefa(4, { plano: qua, hora: '09:30' }),
+      tarefa(5, { plano: '2026-11-05', hora: '08:00' }),
+      tarefa(6),
+    ]), agenda: semana(tarde) };
+    const r = replanejar(d, qua, false, null, seg);
+    expect(r.colocadas.map((c) => `${c.key} ${c.dia} ${c.hora}`)).toEqual([
+      `1:3 ${qua} 14:00`, '1:4 2026-11-05 14:00', '1:5 2026-11-06 14:00',
+    ]);
+    expect(r.antes.map((a) => a.key)).toEqual(['1:3', '1:4', '1:5']);
+  });
+
+  it('respeita a ordem que você arrumou, mesmo fora da ordem da trilha', () => {
+    const d = { ...dados([tarefa(1, { plano: qua, hora: '09:30' }), tarefa(2, { plano: qua, hora: '08:00' })]), agenda: semana(tarde) };
+    expect(replanejar(d, qua, false, null, seg).colocadas.map((c) => c.key)).toEqual(['1:2', '1:1']);
+  });
+
+  it('dia de imprevisto fica vazio e as atrasadas entram se você pedir', () => {
+    const d = { ...dados([tarefa(1, { plano: seg, hora: '08:00' }), tarefa(2, { plano: qua, hora: '08:00' })]), agenda: semana(manha), folgas: [qua] };
+    const sem = replanejar(d, qua, false, null, '2026-11-03');
+    expect(sem.colocadas.map((c) => `${c.key} ${c.dia}`)).toEqual(['1:2 2026-11-05']);
+    const com = replanejar(d, qua, true, null, '2026-11-03');
+    expect(com.colocadas.map((c) => `${c.key} ${c.dia} ${c.hora}`)).toEqual(['1:1 2026-11-05 08:00', '1:2 2026-11-05 09:30']);
   });
 });

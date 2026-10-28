@@ -161,7 +161,12 @@ export function diaDaSemana(iso: string): number {
   return (deIso(iso).getDay() + 6) % 7; // 0 = segunda
 }
 
+export function ehFolga(d: Dados, iso: string): boolean {
+  return (d.folgas ?? []).includes(iso);
+}
+
 export function intervalosDoDia(d: Dados, iso: string): Intervalo[] {
+  if (ehFolga(d, iso)) return [];
   return [...(d.agenda?.[diaDaSemana(iso)] ?? [])].filter((i) => minDe(i.fim) > minDe(i.inicio)).sort((a, b) => minDe(a.inicio) - minDe(b.inicio));
 }
 
@@ -237,6 +242,32 @@ export function encaixar(d: Dados, keys: string[], desde: string, agoraMin: numb
   return res;
 }
 
+// O que o replanejamento mexe: só tarefas pendentes que já têm dia a partir de
+// `desde` (e, se pedir, as atrasadas). Concluídas nunca entram. A ordem é a do
+// seu plano atual (dia, hora, trilha), não a da trilha: o que você arrumou
+// à mão continua na mesma sequência.
+export function aReplanejar(d: Dados, desde: string, comAtrasadas: boolean, h = hoje()): Tarefa[] {
+  const ordem = new Map(ordenadas(d).map((t, i) => [t.key, i]));
+  return d.tarefas
+    .filter((t) => !t.feita && t.plano && (t.plano >= desde || (comAtrasadas && t.plano < h)))
+    .sort((a, b) => (a.plano! < b.plano! ? -1 : a.plano! > b.plano! ? 1 : 0)
+      || (a.hora ? minDe(a.hora) : Infinity) - (b.hora ? minDe(b.hora) : Infinity)
+      || ordem.get(a.key)! - ordem.get(b.key)!);
+}
+
+export interface Replano extends Encaixe {
+  antes: { key: string; plano: string | null; hora: string | null }[];
+}
+
+// Reorganiza as tarefas planejadas nos horários atuais da agenda, a partir de
+// `desde`. Concluídas, atrasadas (se não pedir) e o que está antes de `desde`
+// ficam onde estão. Guarda o "antes" para desfazer.
+export function replanejar(d: Dados, desde: string, comAtrasadas: boolean, agoraMin: number | null = null, h = hoje()): Replano {
+  const alvo = aReplanejar(d, desde, comAtrasadas, h);
+  const r = encaixar(d, alvo.map((t) => t.key), desde, agoraMin, h);
+  return { ...r, antes: alvo.map((t) => ({ key: t.key, plano: t.plano ?? null, hora: t.hora ?? null })) };
+}
+
 export function aPlanejar(d: Dados): Tarefa[] {
   return ordenadas(d).filter((t) => !t.feita && !t.plano);
 }
@@ -286,7 +317,7 @@ export function juntar(atual: Dados | null, lida: Leitura): Dados {
   const tarefasAtuais = new Map(base.tarefas.map((t) => [t.key, t]));
   const tarefas = lida.tarefas.map((nova) => {
     const velha = tarefasAtuais.get(nova.key);
-    return velha ? { ...nova, feita: velha.feita, data: velha.data, chEfetivaMin: velha.chEfetivaMin, questoes: velha.questoes, acertos: velha.acertos, plano: velha.plano ?? null } : nova;
+    return velha ? { ...nova, feita: velha.feita, data: velha.data, chEfetivaMin: velha.chEfetivaMin, questoes: velha.questoes, acertos: velha.acertos, plano: velha.plano ?? null, hora: velha.hora ?? null } : nova;
   });
   // Tarefas que só existem no app (planilha antiga) continuam.
   for (const t of base.tarefas) if (!tarefas.some((x) => x.key === t.key)) tarefas.push(t);

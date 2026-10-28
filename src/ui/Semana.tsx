@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Tarefa } from '../data/model';
-import { aPlanejar, atrasada, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, minutosDisponiveis, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
-import { EditorAgenda, PainelEncaixe } from './Agenda';
+import { aPlanejar, atrasada, ehFolga, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, minutosDisponiveis, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
+import { EditorAgenda, PainelEncaixe, PainelReplanejar } from './Agenda';
 import { Shell } from './Shell';
 import { link } from './rota';
 
@@ -15,7 +15,7 @@ export function Semana() {
   const [sel, setSel] = useState<string | null>(null);
   const [arrastando, setArrastando] = useState<{ key: string; dia: string | null } | null>(null);
   const [alvo, setAlvo] = useState<string | null>(null);
-  const [painel, setPainel] = useState<'agenda' | 'encaixe' | null>(null);
+  const [painel, setPainel] = useState<'agenda' | 'encaixe' | 'replanejar' | 'replanejar-aviso' | null>(null);
 
   const h = hoje();
   const inicio = somarDias(segundaDaSemana(h), desloc * 7);
@@ -133,12 +133,14 @@ export function Semana() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" className={`btn btn-peq ${painel === 'agenda' ? 'btn-ink' : 'btn-linha'}`} onClick={() => setPainel(painel === 'agenda' ? null : 'agenda')}>Minha agenda</button>
               <button type="button" className={`btn btn-peq ${painel === 'encaixe' ? 'btn-ink' : 'btn-linha'}`} onClick={() => setPainel(painel === 'encaixe' ? null : 'encaixe')}>Encaixar na agenda</button>
+              <button type="button" className={`btn btn-peq ${painel?.startsWith('replanejar') ? 'btn-ink' : 'btn-linha'}`} onClick={() => setPainel(painel?.startsWith('replanejar') ? null : 'replanejar')}>Replanejar</button>
             </div>
             {pendentesNaSemana.length > 0 && <button type="button" className="btn btn-texto btn-peq" onClick={limparSemana}>Tirar tudo desta semana</button>}
           </div>
         </section>
 
-        {painel === 'agenda' && <EditorAgenda fechar={() => setPainel(null)} />}
+        {painel === 'agenda' && <EditorAgenda fechar={() => setPainel(null)} salva={() => setPainel('replanejar-aviso')} />}
+        {painel?.startsWith('replanejar') && <PainelReplanejar aviso={painel === 'replanejar-aviso'} abrirAgenda={() => setPainel('agenda')} />}
         {painel === 'encaixe' && <PainelEncaixe desdeSugerido={inicio > h ? inicio : h} abrirAgenda={() => setPainel('agenda')} />}
 
         <div className="tab-rolagem">
@@ -155,7 +157,7 @@ export function Semana() {
                       {disponivel ? `${fmtMin(total)}/${fmtMin(disponivel)}` : fmtMin(total)}
                     </span>
                   </div>
-                  {ts.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{!aberto ? 'sem estudo' : disponivel || !d.agenda ? 'livre' : 'folga'}</span>}
+                  {ts.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{!aberto ? 'sem estudo' : ehFolga(d, dia) ? 'imprevisto · sem estudo' : disponivel || !d.agenda ? 'livre' : 'folga'}</span>}
                   {ts.map((t) =>
                     t.feita ? (
                       <a key={t.key} href={link('ciclo/' + t.key)} className="bloco feito">
