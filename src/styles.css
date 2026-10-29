@@ -18,11 +18,13 @@ a { color: inherit; }
   --bg: #F3F2EE; --ink: #141414; --muted: #5F5D56; --line: #C9C7BF; --faint: #A3A199;
   --line2: #DCDAD3; --text2: #3D3B36; --track: #E4E2DB;
   --done: #141414; --onDone: #F3F2EE; --chart: #141414;
+  --janela: #FBFAF7; --hachura: #DCDAD3; --erro: #D93A3F; --previa: #F6E9A8;
 }
 .papel.escuro, .noite {
   --bg: #111110; --ink: #ECE9E2; --muted: #8C887E; --line: #45423B; --faint: #4A4842;
   --line2: #24221F; --text2: #C9C5BB; --track: #24221F;
   --done: #A39E92; --onDone: #111110; --chart: #A39E92;
+  --janela: #1A1917; --hachura: #2C2A26; --erro: #F06A6E; --previa: #4A4219;
 }
 .papel.escuro { --mark-1: #4A4219; --mark-2: #9A7F14; }
 .tela { min-height: 100vh; background: var(--bg); color: var(--ink); }
@@ -223,3 +225,74 @@ button.bloco { font: inherit; color: inherit; background: transparent; text-alig
 h1.titulo { margin: 0; font-size: 64px; line-height: .95; font-weight: 600; letter-spacing: -.045em; }
 h2.sub { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
 @media (max-width: 720px) { h1.titulo { font-size: 44px; } }
+
+/* Semana · vistas */
+.legenda-semana { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; padding-top: 14px; font-size: 12.5px; }
+.legenda-semana span { display: flex; align-items: center; gap: 7px; }
+.legenda-semana .q { width: 12px; height: 12px; display: block; }
+.q.hachura { background: repeating-linear-gradient(135deg, var(--bg) 0 3px, var(--faint) 3px 4px); }
+.q.mudou { background: var(--previa); border: 1px dashed var(--ink); }
+
+.horario { display: grid; grid-template-columns: 40px repeat(7, minmax(112px, 1fr)); min-width: 860px; }
+.horario-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; padding: 0 6px 8px; border-bottom: 1px solid var(--ink); }
+.horario-hora { position: absolute; right: 8px; font-size: 10px; color: var(--faint); transform: translateY(-50%); }
+.horario-col { position: relative; border-left: 1px solid var(--line2); background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hachura) 6px 7px); }
+.horario-col.alvo { outline: 1px dashed var(--ink); outline-offset: -1px; }
+.horario-linha { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line2); pointer-events: none; }
+.horario-janela { position: absolute; left: 0; right: 0; background: var(--janela); border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); pointer-events: none; }
+.horario-col.alvo .horario-janela { background: var(--track); }
+.horario-aviso { position: absolute; left: 6px; right: 6px; top: 35%; text-align: center; font-size: 12px; color: var(--muted); background: var(--bg); padding: 6px 0; }
+.bloco.horario-bloco { position: absolute; left: 4px; right: 4px; width: auto; min-height: 0; padding: 6px 8px; gap: 3px; justify-content: flex-start; overflow: hidden; background: var(--janela); }
+.bloco.horario-bloco.feito { background: var(--done); }
+.bloco.horario-bloco.agora { background: var(--mark); }
+.horario-agora { position: absolute; left: -4px; right: 0; border-top: 2px solid var(--ink); pointer-events: none; z-index: 2; }
+.horario-agora i { position: absolute; left: 0; top: -5px; width: 8px; height: 8px; background: var(--ink); display: block; }
+
+.fila-previa { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; font-size: 13.5px; }
+.chave { width: 36px; height: 20px; padding: 0; border: 1px solid var(--ink); background: transparent; position: relative; }
+.chave i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; background: var(--ink); display: block; }
+.chave.on { background: var(--ink); }
+.chave.on i { left: 19px; background: var(--mark); }
+.fila { display: grid; grid-template-columns: 132px minmax(0, 1fr) 104px; gap: 0 18px; align-items: stretch; }
+.fila-regua { position: relative; height: 18px; }
+.fila-regua span { position: absolute; font-size: 10px; color: var(--faint); transform: translateX(-50%); }
+.fila-regua span:first-child { transform: none; }
+.fila-dia { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line2); }
+.fila-barra { position: relative; min-height: 66px; border-top: 1px solid var(--line2); background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hachura) 6px 7px); }
+.fila-barra.alvo { outline: 1px dashed var(--ink); outline-offset: -1px; }
+.fila-agenda { position: absolute; left: 0; top: 6px; bottom: 6px; background: var(--janela); outline: 1px solid var(--line); pointer-events: none; }
+.bloco.fila-peca { position: absolute; top: 6px; bottom: 6px; min-height: 0; padding: 6px 8px; gap: 2px; overflow: hidden; white-space: nowrap; background: var(--janela); }
+.bloco.fila-peca.feito { background: var(--done); }
+.bloco.fila-peca.agora { background: var(--mark); }
+.bloco.fila-peca.fora { border-color: var(--erro); }
+.bloco.fila-peca.atrasada { border-color: var(--ink); }
+.bloco.fila-peca.previa { background: var(--previa); border: 1px dashed var(--ink); }
+.fila-nome { font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.fila-vazio { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 12.5px; color: var(--muted); }
+.fila-limite { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--erro); pointer-events: none; }
+.fila-num { display: flex; flex-direction: column; justify-content: center; align-items: flex-end; gap: 2px; border-top: 1px solid var(--line2); }
+
+.quatro-imprevisto { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; border: 2px solid var(--ink); background: var(--janela); padding: 16px 18px; }
+.quatro { display: grid; grid-template-columns: 84px repeat(7, minmax(0, 1fr)); gap: 4px; }
+.quatro-semana { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 0 8px; border: 0; border-left: 3px solid transparent; background: transparent; text-align: left; }
+.quatro-semana.on { border-left-color: var(--ink); }
+.quatro-dia { display: flex; flex-direction: column; gap: 8px; min-height: 96px; padding: 8px 9px; border: 1px solid var(--line2); background: var(--janela); cursor: pointer; }
+.quatro-dia:hover { border-color: var(--ink); }
+.quatro-dia.passado { background: transparent; cursor: default; }
+.quatro-dia.sem-agenda { background: transparent; cursor: default; }
+.quatro-dia.hoje { border-color: var(--ink); }
+.quatro-dia.folga { background: repeating-linear-gradient(135deg, var(--bg) 0 6px, var(--hachura) 6px 7px); }
+.quatro-dia.alvo { outline: 1px dashed var(--ink); }
+.q.quatro-q { width: 18px; height: 18px; border-color: var(--ink); cursor: pointer; }
+.q.quatro-q.feito { cursor: default; }
+.q.quatro-q.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+.q.quatro-q.atrasada { border-width: 2px; }
+@media (max-width: 720px) {
+  .fila { grid-template-columns: 76px minmax(0, 1fr); }
+  .fila-num, .fila > .rotulo { display: none; }
+  .quatro { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  .quatro-semana { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; padding: 6px 0 0; border-left: 0; }
+  .quatro > span:first-child { display: none; }
+  .quatro-dia { min-height: 64px; padding: 4px; }
+  .q.quatro-q { width: 10px; height: 10px; }
+}

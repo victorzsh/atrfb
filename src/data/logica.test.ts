@@ -1,5 +1,5 @@
 import type { Dados, Tarefa } from './model';
-import { aPlanejar, atrasada, encaixar, hoje, plano, replanejar, somarDias } from './logica';
+import { aPlanejar, atrasada, encaixar, hoje, horarios, plano, replanejar, simularFolgas, somarDias } from './logica';
 
 function tarefa(n: number, extra: Partial<Tarefa> = {}): Tarefa {
   return { key: `1:${n}`, trilha: 1, num: n, disciplina: 'PORTUGUÊS', descricao: '', chMin: 90, feita: false, data: null, chEfetivaMin: null, questoes: null, acertos: null, row: n, ...extra };
@@ -109,5 +109,30 @@ describe('replanejar depois de um imprevisto', () => {
     expect(sem.colocadas.map((c) => `${c.key} ${c.dia}`)).toEqual(['1:2 2026-11-05']);
     const com = replanejar(d, qua, true, null, '2026-11-03');
     expect(com.colocadas.map((c) => `${c.key} ${c.dia} ${c.hora}`)).toEqual(['1:1 2026-11-05 08:00', '1:2 2026-11-05 09:30']);
+  });
+});
+
+describe('vistas da semana', () => {
+  const seg = '2026-11-02';
+  const ter = '2026-11-03';
+  const qua = '2026-11-04';
+  const agenda = [[{ inicio: '08:00', fim: '11:00' }, { inicio: '14:00', fim: '17:00' }], [{ inicio: '08:00', fim: '11:00' }], [{ inicio: '08:00', fim: '11:00' }], [], [], [], []];
+
+  it('horário: quem tem hora fica nela; o resto ocupa os vãos a partir do começo da agenda', () => {
+    const d = { ...dados([tarefa(1, { feita: true, data: seg, chEfetivaMin: 60 }), tarefa(2, { plano: seg, hora: '08:30' }), tarefa(3, { plano: seg })]), agenda };
+    const p = horarios(d, seg, plano(d, seg, seg).get(seg)!);
+    expect(p.map((x) => `${x.t.num} ${x.ini}-${x.fim}`)).toEqual(['2 510-600', '1 600-660', '3 660-750']);
+  });
+
+  it('simular imprevisto não altera os dados e mostra o novo fim do plano', () => {
+    const d = { ...dados([tarefa(1, { plano: seg, hora: '08:00' }), tarefa(2, { plano: ter, hora: '08:00' }), tarefa(3, { plano: qua, hora: '08:00' })]), agenda };
+    const s = simularFolgas(d, [ter], null, seg)!;
+    expect(s.folgas).toEqual([ter]);
+    expect(s.colocadas.map((c) => `${c.key} ${c.dia}`)).toEqual([`1:2 ${qua}`, `1:3 ${qua}`]);
+    expect(s.fimAntes).toBe(qua);
+    expect(s.fimDepois).toBe(qua);
+    expect(d.folgas).toBeUndefined();
+    expect(d.tarefas[1].plano).toBe(ter);
+    expect(simularFolgas(d, ['2026-11-01'], null, seg)).toBeNull();
   });
 });

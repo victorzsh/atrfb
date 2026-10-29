@@ -328,3 +328,49 @@ export function trilhasNovas(atual: Dados | null, lida: Leitura): number[] {
   const tem = new Set(atual?.tarefas.map((t) => t.trilha) ?? []);
   return [...new Set(lida.tarefas.map((t) => t.trilha))].filter((n) => !tem.has(n)).sort((a, b) => a - b);
 }
+
+// ---------- semana: horário e simulação ----------
+
+export interface NoHorario {
+  t: Tarefa;
+  ini: number; // minutos do dia
+  fim: number;
+}
+
+// Onde cada tarefa do dia aparece na grade de horário: quem tem hora fica nela;
+// quem não tem (feitas e as soltas no dia) entra no primeiro vão livre a partir
+// do começo da agenda, na ordem do plano.
+export function horarios(d: Dados, dia: string, ts: Tarefa[]): NoHorario[] {
+  const dur = (t: Tarefa) => (t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin);
+  const res: NoHorario[] = [];
+  for (const t of ts) if (!t.feita && t.hora) res.push({ t, ini: minDe(t.hora), fim: minDe(t.hora) + dur(t) });
+  const jan = intervalosDoDia(d, dia);
+  let cursor = jan.length ? minDe(jan[0].inicio) : 8 * 60;
+  for (const t of ts) {
+    if (!t.feita && t.hora) continue;
+    for (let mudou = true; mudou; ) {
+      mudou = false;
+      for (const o of res) if (cursor < o.fim && cursor + dur(t) > o.ini) { cursor = o.fim; mudou = true; }
+    }
+    res.push({ t, ini: cursor, fim: cursor + dur(t) });
+    cursor += dur(t);
+  }
+  return res.sort((a, b) => a.ini - b.ini);
+}
+
+export interface Simulacao extends Replano {
+  folgas: string[];
+  fimAntes: string | null;
+  fimDepois: string | null;
+}
+
+// "E se eu não estudar nesses dias?": replaneja numa cópia, sem tocar nos dados.
+export function simularFolgas(d: Dados, dias: string[], agoraMin: number | null = null, h = hoje()): Simulacao | null {
+  const novas = dias.filter((x) => x >= h && !ehFolga(d, x)).sort();
+  if (!novas.length) return null;
+  const copia: Dados = { ...d, folgas: [...(d.folgas ?? []), ...novas] };
+  const desde = novas[0];
+  const r = replanejar(copia, desde, false, desde <= h ? agoraMin : null, h);
+  const fim = (xs: (string | null)[]) => xs.reduce<string | null>((m, x) => (x && (!m || x > m) ? x : m), null);
+  return { ...r, folgas: novas, fimAntes: fim(r.antes.map((a) => a.plano)), fimDepois: fim(r.colocadas.map((c) => c.dia)) };
+}

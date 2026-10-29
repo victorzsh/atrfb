@@ -1,12 +1,22 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Tarefa } from '../data/model';
-import { aPlanejar, atrasada, ehFolga, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, minutosDisponiveis, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
+import { aPlanejar, atrasada, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
 import { EditorAgenda, PainelEncaixe, PainelReplanejar } from './Agenda';
 import { Shell } from './Shell';
+import { type Ctx, type Vista, VistaFila, VistaHorario, VistaQuatro } from './SemanaVistas';
 import { link } from './rota';
 
 const FORA = 'a-planejar';
+const VISTAS: [Vista, string][] = [['horario', 'HORÁRIO'], ['fila', 'FILA'], ['quatro', '4 SEMANAS']];
+
+function vistaSalva(): Vista {
+  try {
+    const v = localStorage.getItem('semana.vista');
+    if (v === 'horario' || v === 'fila' || v === 'quatro') return v;
+  } catch { /* sem armazenamento: usa o padrão */ }
+  return 'horario';
+}
 
 export function Semana() {
   const d = useDados();
@@ -15,6 +25,8 @@ export function Semana() {
   const [sel, setSel] = useState<string | null>(null);
   const [arrastando, setArrastando] = useState<{ key: string; dia: string | null } | null>(null);
   const [alvo, setAlvo] = useState<string | null>(null);
+  const [vista, setVistaEstado] = useState<Vista>(vistaSalva);
+  const pegada = useRef(0);
   const [painel, setPainel] = useState<'agenda' | 'encaixe' | 'replanejar' | 'replanejar-aviso' | null>(null);
 
   const h = hoje();
@@ -37,24 +49,30 @@ export function Semana() {
   const atrasadas = d.tarefas.filter((t) => atrasada(t, h)).length;
   const pendentesNaSemana = [...dias.values()].flat().filter((t) => !t.feita);
 
-  const mover = (t: Tarefa, dia: string | null) => {
+  const setVista = (v: Vista) => {
+    setVistaEstado(v);
+    try { localStorage.setItem('semana.vista', v); } catch { /* fica só nesta visita */ }
+  };
+
+  const mover = (t: Tarefa, dia: string | null, hora: string | null = null) => {
     // O bloco arrastado muda de coluna e o navegador nem sempre avisa o fim do arrasto.
     setArrastando(null);
     setAlvo(null);
     if (dia !== null && dia < h) return;
-    if ((t.plano ?? null) === dia) return setSel(null);
-    alterar(dia ? `${rotulo(t)} planejada para ${diaCurto(dia)} ${dataCurta(dia)}` : `${rotulo(t)} sem dia`, (x) => {
-      Object.assign(x.tarefas.find((y) => y.key === t.key)!, { plano: dia, hora: null });
+    if ((t.plano ?? null) === dia && (t.hora ?? null) === hora) return setSel(null);
+    alterar(dia ? `${rotulo(t)} planejada para ${diaCurto(dia)} ${dataCurta(dia)}${hora ? ' às ' + hora : ''}` : `${rotulo(t)} sem dia`, (x) => {
+      Object.assign(x.tarefas.find((y) => y.key === t.key)!, { plano: dia, hora: dia ? hora : null });
     });
     setSel(null);
   };
 
-  const soltarEm = (dia: string | null) => (e: React.DragEvent) => {
+  const soltar = (e: React.DragEvent, dia: string | null, hora: string | null = null) => {
     e.preventDefault();
     setAlvo(null);
     const t = d.tarefas.find((x) => x.key === e.dataTransfer.getData('text/plain'));
-    if (t) mover(t, dia);
+    if (t) mover(t, dia, hora);
   };
+  const soltarEm = (dia: string | null) => (e: React.DragEvent) => soltar(e, dia);
 
   const soltarSemana = (delta: number) => (e: React.DragEvent) => {
     e.preventDefault();
@@ -85,22 +103,31 @@ export function Semana() {
     });
   };
 
+  const arrastavel = (t: Tarefa, dia: string | null) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent<HTMLButtonElement>) => {
+      e.dataTransfer.setData('text/plain', t.key);
+      e.dataTransfer.effectAllowed = 'move';
+      pegada.current = e.clientY - e.currentTarget.getBoundingClientRect().top;
+      setArrastando({ key: t.key, dia });
+      setSel(null);
+    },
+    onDragEnd: () => {
+      setArrastando(null);
+      setAlvo(null);
+    },
+    onClick: () => setSel(sel === t.key ? null : t.key),
+  });
+
+  const ctx: Ctx = {
+    d, h, inicio, sel, setSel, arrastandoKey: arrastando?.key ?? null, alvo, arrastavel, zona, soltar, pegadaY: () => pegada.current,
+  };
+
   const bloco = (t: Tarefa, dia: string | null, compacto?: boolean) => (
     <button
       key={t.key}
       type="button"
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/plain', t.key);
-        e.dataTransfer.effectAllowed = 'move';
-        setArrastando({ key: t.key, dia });
-        setSel(null);
-      }}
-      onDragEnd={() => {
-        setArrastando(null);
-        setAlvo(null);
-      }}
-      onClick={() => setSel(sel === t.key ? null : t.key)}
+      {...arrastavel(t, dia)}
       className={`bloco movel${compacto ? ' compacto' : ''}${t.key === atual ? ' agora' : ''}${sel === t.key ? ' sel' : ''}${arrastando?.key === t.key ? ' fantasma' : ''}`}
       aria-pressed={sel === t.key}
       aria-label={`${rotulo(t)}, ${nomeDisciplina(d, t)}. Arraste para um dia ou clique para mover.`}
@@ -125,10 +152,17 @@ export function Semana() {
             {atrasadas > 0 ? `, ${atrasadas} ${atrasadas === 1 ? 'atrasada' : 'atrasadas'} no total` : ''}. {soltas.length} ainda sem dia.
           </p>
           <div className="fim" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+            <div className="grupo-seg mono" role="group" aria-label="Modo de ver">
+              {VISTAS.map(([v, nome]) => (
+                <button key={v} type="button" className={vista === v ? 'on' : ''} onClick={() => setVista(v)} aria-pressed={vista === v}>{nome}</button>
+              ))}
+            </div>
             <div className="grupo-seg mono" role="group" aria-label="Semana">
               <button type="button" className={alvo === 'antes' ? 'on' : ''} onClick={() => setDesloc(desloc - 1)} aria-label="Semana anterior" {...zona('antes', true, soltarSemana(-1))}>←</button>
               <button type="button" className={desloc === 0 ? 'on' : ''} onClick={() => setDesloc(0)}>ESTA SEMANA</button>
               <button type="button" className={alvo === 'depois' ? 'on' : ''} onClick={() => setDesloc(desloc + 1)} aria-label="Próxima semana" {...zona('depois', true, soltarSemana(1))}>→</button>
+            </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" className={`btn btn-peq ${painel === 'agenda' ? 'btn-ink' : 'btn-linha'}`} onClick={() => setPainel(painel === 'agenda' ? null : 'agenda')}>Minha agenda</button>
@@ -143,41 +177,9 @@ export function Semana() {
         {painel?.startsWith('replanejar') && <PainelReplanejar aviso={painel === 'replanejar-aviso'} abrirAgenda={() => setPainel('agenda')} />}
         {painel === 'encaixe' && <PainelEncaixe desdeSugerido={inicio > h ? inicio : h} abrirAgenda={() => setPainel('agenda')} />}
 
-        <div className="tab-rolagem">
-          <div className="semana">
-            {[...dias.entries()].map(([dia, ts]) => {
-              const total = ts.reduce((s, t) => s + (t.feita ? t.chEfetivaMin ?? 0 : t.chMin), 0);
-              const aberto = dia >= h;
-              const disponivel = aberto ? minutosDisponiveis(d, dia) : 0;
-              return (
-                <section key={dia} className={`dia${alvo === dia ? ' alvo' : ''}`} {...zona(dia, aberto, soltarEm(dia))}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: '1px solid var(--ink)', paddingBottom: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 20, fontWeight: dia === h ? 600 : 500, letterSpacing: '-.02em', textTransform: 'capitalize' }}>{diaCurto(dia)} {dataCurta(dia).split(' ')[0]}</span>
-                    <span className="mono muted" style={{ fontSize: 11 }} title={disponivel ? `${fmtMin(total)} planejadas de ${fmtMin(disponivel)} na sua agenda` : undefined}>
-                      {disponivel ? `${fmtMin(total)}/${fmtMin(disponivel)}` : fmtMin(total)}
-                    </span>
-                  </div>
-                  {ts.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{!aberto ? 'sem estudo' : ehFolga(d, dia) ? 'imprevisto · sem estudo' : disponivel || !d.agenda ? 'livre' : 'folga'}</span>}
-                  {ts.map((t) =>
-                    t.feita ? (
-                      <a key={t.key} href={link('ciclo/' + t.key)} className="bloco feito">
-                        <span className="mono" style={{ fontSize: 11 }}>{rotulo(t)} · {fmtMin(t.chEfetivaMin ?? t.chMin)}</span>
-                        <span style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.2 }}>{nomeDisciplina(d, t)}</span>
-                      </a>
-                    ) : (
-                      bloco(t, dia)
-                    ),
-                  )}
-                  {selecionada && aberto && selecionada.plano !== dia && (
-                    <button type="button" className="bloco destino" onClick={() => mover(selecionada, dia)}>
-                      Mover {rotulo(selecionada)} para cá
-                    </button>
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        </div>
+        {vista === 'horario' && <VistaHorario c={ctx} />}
+        {vista === 'fila' && <VistaFila c={ctx} />}
+        {vista === 'quatro' && <VistaQuatro c={ctx} irPara={(n) => setDesloc(desloc + n)} />}
 
         <section aria-label="A planejar" className={`a-planejar${alvo === FORA ? ' alvo' : ''}`} {...zona(FORA, true, soltarEm(null))}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '8px 20px', borderBottom: '2px solid var(--ink)', paddingBottom: 12 }}>
@@ -207,10 +209,16 @@ export function Semana() {
       {selecionada && (
         <div className="barra-mover" role="region" aria-label="Mover tarefa">
           <span style={{ fontWeight: 600 }}>{rotulo(selecionada)} · {nomeDisciplina(d, selecionada)}</span>
-          <span className="muted" style={{ fontSize: 13 }}>Toque em “Mover para cá” no dia; use ← → para outras semanas.</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }} role="group" aria-label="Mover para o dia">
+            {[...dias.keys()].filter((dia) => dia >= h).map((dia) => (
+              <button key={dia} type="button" className={`btn btn-peq ${selecionada.plano === dia ? 'btn-ink' : 'btn-linha'}`} style={{ padding: '0 10px', textTransform: 'capitalize' }} onClick={() => mover(selecionada, dia)}>
+                {diaCurto(dia)} {dataCurta(dia).split(' ')[0]}
+              </button>
+            ))}
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginLeft: 'auto' }}>
-            <button type="button" className="btn btn-linha btn-peq" onClick={() => setDesloc(desloc - 1)} aria-label="Semana anterior">←</button>
-            <button type="button" className="btn btn-linha btn-peq" onClick={() => setDesloc(desloc + 1)} aria-label="Próxima semana">→</button>
+            <button type="button" className="btn btn-linha btn-peq" onClick={() => setDesloc(desloc - 1)} aria-label="Semana anterior">← semana</button>
+            <button type="button" className="btn btn-linha btn-peq" onClick={() => setDesloc(desloc + 1)} aria-label="Próxima semana">semana →</button>
             {selecionada.plano && <button type="button" className="btn btn-linha btn-peq" onClick={() => mover(selecionada, null)}>Tirar do dia</button>}
             <a className="btn btn-texto btn-peq" href={link('ciclo/' + selecionada.key)}>Abrir</a>
             <button type="button" className="btn btn-texto btn-peq" onClick={() => setSel(null)}>Fechar</button>
