@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Intervalo } from '../data/model';
-import { aPlanejar, aReplanejar, atrasada, dataCurta, deIso, diaCurto, DIAS_SEMANA, encaixar, fmtMin, hhmm, hoje, minDe, replanejar, rotulo, somarDias, temAgenda, trilhas } from '../data/logica';
+import { aPlanejar, aReplanejar, atrasada, colocar, dataCurta, deIso, diaCurto, DIAS_SEMANA, encaixar, fmtMin, hhmm, hoje, minDe, type Posicao, replanejar, restaurar, rotulo, somarDias, temAgenda, trilhas, ultimoDiaDe } from '../data/logica';
 
 const vazia = (): Intervalo[][] => Array.from({ length: 7 }, () => []);
 
@@ -104,10 +104,10 @@ export function PainelEncaixe({ desdeSugerido, abrirAgenda }: { desdeSugerido: s
     }
     const nome = qual === 'todas' ? 'Tarefas sem dia' : `Trilha ${qual}`;
     alterar(`${nome} encaixada na agenda (${r.colocadas.length} tarefas)`, (x) => {
-      for (const c of r.colocadas) Object.assign(x.tarefas.find((t) => t.key === c.key)!, { plano: c.dia, hora: c.hora });
+      for (const c of r.colocadas) colocar(x.tarefas.find((t) => t.key === c.key)!, c);
     });
     const p = r.colocadas[0].dia;
-    const u = r.colocadas[r.colocadas.length - 1].dia;
+    const u = r.colocadas[r.colocadas.length - 1].partes.at(-1)!.dia;
     const fora = r.semEspaco.map((k) => rotulo(d.tarefas.find((t) => t.key === k)!));
     setUltimo({
       keys: r.colocadas.map((c) => c.key),
@@ -120,7 +120,7 @@ export function PainelEncaixe({ desdeSugerido, abrirAgenda }: { desdeSugerido: s
     if (!ultimo) return;
     const keys = new Set(ultimo.keys);
     alterar('Encaixe desfeito', (x) => {
-      for (const t of x.tarefas) if (keys.has(t.key) && !t.feita) Object.assign(t, { plano: null, hora: null });
+      for (const t of x.tarefas) if (keys.has(t.key) && !t.feita) colocar(t, null);
     });
     setUltimo(null);
   };
@@ -176,13 +176,13 @@ export function PainelReplanejar({ aviso, abrirAgenda }: { aviso?: boolean; abri
   const [comAtrasadas, setComAtrasadas] = useState(false);
   const [folgaDe, setFolgaDe] = useState(h);
   const [folgaAte, setFolgaAte] = useState(h);
-  const [ultimo, setUltimo] = useState<{ antes: { key: string; plano: string | null; hora: string | null }[]; msg: string } | null>(null);
+  const [ultimo, setUltimo] = useState<{ antes: Posicao[]; msg: string } | null>(null);
 
   const alvo = aReplanejar(d, desde, comAtrasadas, h);
   const nAtrasadas = d.tarefas.filter((t) => atrasada(t, h)).length;
   const feitas = d.tarefas.filter((t) => t.feita).length;
   const folgas = [...(d.folgas ?? [])].filter((x) => x >= h).sort();
-  const fimAntes = alvo.reduce((m, t) => (t.plano! > m ? t.plano! : m), '');
+  const fimAntes = alvo.reduce((m, t) => (ultimoDiaDe(t)! > m ? ultimoDiaDe(t)! : m), '');
 
   const fazer = () => {
     const r = replanejar(d, desde, comAtrasadas, desde <= h ? agoraMin() : null, h);
@@ -190,10 +190,10 @@ export function PainelReplanejar({ aviso, abrirAgenda }: { aviso?: boolean; abri
       const pos = new Map(r.colocadas.map((c) => [c.key, c]));
       for (const a of r.antes) {
         const c = pos.get(a.key);
-        Object.assign(x.tarefas.find((t) => t.key === a.key)!, c ? { plano: c.dia, hora: c.hora } : { plano: null, hora: null });
+        colocar(x.tarefas.find((t) => t.key === a.key)!, c ?? null);
       }
     });
-    const u = r.colocadas.length ? r.colocadas[r.colocadas.length - 1].dia : null;
+    const u = r.colocadas.length ? r.colocadas.reduce((m, c) => (c.partes.at(-1)!.dia > m ? c.partes.at(-1)!.dia : m), '') : null;
     const fora = r.semEspaco.map((k) => rotulo(d.tarefas.find((t) => t.key === k)!));
     setUltimo({
       antes: r.antes,
@@ -210,7 +210,7 @@ export function PainelReplanejar({ aviso, abrirAgenda }: { aviso?: boolean; abri
     alterar('Replanejamento desfeito', (x) => {
       for (const a of ultimo.antes) {
         const t = x.tarefas.find((y) => y.key === a.key);
-        if (t && !t.feita) Object.assign(t, { plano: a.plano, hora: a.hora });
+        if (t && !t.feita) restaurar(t, a);
       }
     });
     setUltimo(null);

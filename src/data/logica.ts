@@ -1,4 +1,4 @@
-import type { Dados, Disciplina, Intervalo, Tarefa } from './model';
+import type { Dados, Disciplina, Intervalo, Parte, Tarefa } from './model';
 import { normalizar } from './model';
 import type { Leitura } from '../xlsx/planilha';
 
@@ -125,23 +125,75 @@ export function proximaAula(disc: Disciplina): number | null {
 // Plano da semana: só o que você decidiu. A tarefa feita fica no dia em que
 // foi feita; a pendente fica no dia em que você a colocou. Nada é distribuído
 // sozinho: o que não tem dia fica em "A planejar".
-export function plano(d: Dados, desde: string, ate: string): Map<string, Tarefa[]> {
-  const dias = new Map<string, Tarefa[]>();
+export function plano(d: Dados, desde: string, ate: string): Map<string, TarefaNoDia[]> {
+  const dias = new Map<string, TarefaNoDia[]>();
   for (let x = desde; x <= ate; x = somarDias(x, 1)) dias.set(x, []);
   for (const t of ordenadas(d)) {
-    const dia = t.feita ? t.data : t.plano;
-    if (dia) dias.get(dia)?.push(t);
+    if (!t.feita && t.partes?.length) for (const p of pedacosNoDia(t, t.partes)) dias.get(p.plano!)?.push(p);
+    else {
+      const dia = t.feita ? t.data : t.plano;
+      if (dia) dias.get(dia)?.push(t);
+    }
   }
   // Dentro do dia: primeiro as que têm horário, pela hora; depois as outras, na ordem da trilha.
   for (const ts of dias.values()) {
-    const ordem = new Map(ts.map((t, i) => [t.key, i]));
+    const ordem = new Map(ts.map((t, i) => [t, i]));
     ts.sort((a, b) => {
       const ha = !a.feita && a.hora ? minDe(a.hora) : Infinity;
       const hb = !b.feita && b.hora ? minDe(b.hora) : Infinity;
-      return ha - hb || ordem.get(a.key)! - ordem.get(b.key)!;
+      return ha - hb || ordem.get(a)! - ordem.get(b)!;
     });
   }
   return dias;
+}
+
+// ---------- tarefa dividida ----------
+
+// Uma tarefa como aparece num dia: se foi dividida, cada pedaço vira uma
+// entrada com o dia, a hora e os minutos daquele pedaço.
+export type TarefaNoDia = Tarefa & { parte?: { i: number; n: number } };
+
+export function pedacosNoDia(t: Tarefa, partes: Parte[]): TarefaNoDia[] {
+  if (partes.length < 2) return [{ ...t, plano: partes[0]?.dia ?? null, hora: partes[0]?.hora ?? null }];
+  return partes.map((p, i) => ({ ...t, plano: p.dia, hora: p.hora, chMin: p.min, parte: { i, n: partes.length } }));
+}
+
+// Chave única do bloco na tela (uma tarefa dividida tem vários).
+export function chaveBloco(t: TarefaNoDia): string {
+  return t.parte ? `${t.key}#${t.parte.i}` : t.key;
+}
+
+// Onde cada pedaço pendente está: [dia, hora, minutos].
+function pedacos(t: Tarefa): { dia: string; hora: string | null; min: number }[] {
+  if (t.feita || !t.plano) return [];
+  return t.partes?.length ? t.partes : [{ dia: t.plano, hora: t.hora ?? null, min: t.chMin }];
+}
+
+// Último dia em que a tarefa pendente tem estudo.
+export function ultimoDiaDe(t: Tarefa): string | null {
+  const ps = pedacos(t);
+  return ps.length ? ps[ps.length - 1].dia : null;
+}
+
+export interface Posicao {
+  key: string;
+  plano: string | null;
+  hora: string | null;
+  partes: Parte[] | null;
+}
+
+export function posicao(t: Tarefa): Posicao {
+  return { key: t.key, plano: t.plano ?? null, hora: t.hora ?? null, partes: t.partes ?? null };
+}
+
+// Grava onde a tarefa fica (null = sem dia). Mover à mão junta os pedaços num bloco só.
+export function colocar(t: Tarefa, c: { dia: string; hora: string | null; partes?: Parte[] } | null) {
+  if (!c) Object.assign(t, { plano: null, hora: null, partes: null });
+  else Object.assign(t, { plano: c.dia, hora: c.hora, partes: c.partes && c.partes.length > 1 ? c.partes : null });
+}
+
+export function restaurar(t: Tarefa, a: Posicao) {
+  Object.assign(t, { plano: a.plano, hora: a.hora, partes: a.partes });
 }
 
 // ---------- agenda ----------
@@ -196,49 +248,84 @@ function ocupar(vaos: Vao[], a: number, b: number): Vao[] {
   return out;
 }
 
+export interface Colocada {
+  key: string;
+  dia: string; // do primeiro pedaço
+  hora: string;
+  partes: Parte[]; // um só quando a tarefa coube inteira
+}
+
 export interface Encaixe {
-  colocadas: { key: string; dia: string; hora: string }[];
+  colocadas: Colocada[];
   semEspaco: string[];
 }
 
+// Pedaço mínimo: uma sobra menor que isso na janela fica livre.
+export const MIN_PEDACO = 15;
+
 // Encaixa as tarefas pedidas, na ordem dada, nos horários livres da agenda a
-// partir de `desde`. Não mexe em nenhuma tarefa que já tem dia: os horários
-// delas contam como ocupados. Hoje, só depois de `agoraMin`.
+// partir de `desde`. Quando a janela acaba no meio de uma tarefa, ela é
+// dividida e continua no próximo horário livre (no mesmo dia ou nos
+// seguintes). Não mexe em nenhuma tarefa que já tem dia: os horários delas
+// contam como ocupados. Hoje, só depois de `agoraMin`.
 export function encaixar(d: Dados, keys: string[], desde: string, agoraMin: number | null = null, h = hoje()): Encaixe {
   const res: Encaixe = { colocadas: [], semEspaco: [] };
-  const maiorJanela = Math.max(0, ...(d.agenda ?? []).flat().map((i) => minDe(i.fim) - minDe(i.inicio)));
   const fila = keys.map((k) => d.tarefas.find((t) => t.key === k)).filter((t): t is Tarefa => !!t && !t.feita);
-  const cabem = fila.filter((t) => t.chMin <= maiorJanela);
-  res.semEspaco = fila.filter((t) => t.chMin > maiorJanela).map((t) => t.key);
-  if (!cabem.length) return res;
+  if (!fila.length) return res;
+  if (!temAgenda(d)) {
+    res.semEspaco = fila.map((t) => t.key);
+    return res;
+  }
+  const naFila = new Set(keys);
 
   let i = 0;
-  for (let dia = desde < h ? h : desde, n = 0; i < cabem.length && n < 730; dia = somarDias(dia, 1), n++) {
+  let partes: Parte[] = [];
+  let resta = fila[0].chMin;
+  const fechar = () => {
+    res.colocadas.push({ key: fila[i].key, dia: partes[0].dia, hora: partes[0].hora, partes });
+    i++;
+    partes = [];
+    resta = fila[i]?.chMin ?? 0;
+  };
+  for (let dia = desde < h ? h : desde, n = 0; i < fila.length && n < 730; dia = somarDias(dia, 1), n++) {
     let vaos: Vao[] = intervalosDoDia(d, dia).map((x) => ({ ini: minDe(x.inicio), fim: minDe(x.fim) }));
     if (!vaos.length) continue;
     if (dia === h && agoraMin !== null) vaos = ocupar(vaos, 0, agoraMin);
     // O que você já colocou neste dia ocupa o horário dele (ou, sem horário, o começo do dia).
-    const doDia = d.tarefas.filter((t) => !t.feita && t.plano === dia && !keys.includes(t.key));
-    for (const t of doDia.filter((x) => x.hora)) vaos = ocupar(vaos, minDe(t.hora!), minDe(t.hora!) + t.chMin);
-    for (const t of doDia.filter((x) => !x.hora)) {
-      let resta = t.chMin;
-      while (resta > 0 && vaos.length) {
+    const doDia = d.tarefas.filter((t) => !naFila.has(t.key)).flatMap((t) => pedacos(t).filter((p) => p.dia === dia));
+    for (const p of doDia.filter((x) => x.hora)) vaos = ocupar(vaos, minDe(p.hora!), minDe(p.hora!) + p.min);
+    for (const p of doDia.filter((x) => !x.hora)) {
+      let sobra = p.min;
+      while (sobra > 0 && vaos.length) {
         const v = vaos[0];
-        const usa = Math.min(resta, v.fim - v.ini);
+        const usa = Math.min(sobra, v.fim - v.ini);
         vaos = ocupar(vaos, v.ini, v.ini + usa);
-        resta -= usa;
+        sobra -= usa;
       }
     }
-    while (i < cabem.length) {
-      const t = cabem[i];
-      const v = vaos.find((x) => x.fim - x.ini >= t.chMin);
-      if (!v) break; // a ordem da trilha vale: a próxima espera o próximo dia
-      res.colocadas.push({ key: t.key, dia, hora: hhmm(v.ini) });
-      vaos = ocupar(vaos, v.ini, v.ini + t.chMin);
-      i++;
+    // A ordem da trilha vale: cada vão é preenchido de ponta a ponta, e a
+    // tarefa que não cabe inteira continua no vão seguinte.
+    for (const v of vaos) {
+      let ini = v.ini;
+      while (i < fila.length) {
+        if (resta <= 0) {
+          if (!partes.length) partes.push({ dia, hora: hhmm(ini), min: 0 });
+          fechar();
+          continue;
+        }
+        const livre = v.fim - ini;
+        if (livre < Math.min(MIN_PEDACO, resta)) break;
+        const usa = Math.min(resta, livre);
+        const ult = partes[partes.length - 1];
+        if (ult && ult.dia === dia && minDe(ult.hora) + ult.min === ini) ult.min += usa;
+        else partes.push({ dia, hora: hhmm(ini), min: usa });
+        ini += usa;
+        resta -= usa;
+        if (resta <= 0) fechar();
+      }
     }
   }
-  res.semEspaco.push(...cabem.slice(i).map((t) => t.key));
+  res.semEspaco.push(...fila.slice(i).map((t) => t.key));
   return res;
 }
 
@@ -256,7 +343,7 @@ export function aReplanejar(d: Dados, desde: string, comAtrasadas: boolean, h = 
 }
 
 export interface Replano extends Encaixe {
-  antes: { key: string; plano: string | null; hora: string | null }[];
+  antes: Posicao[];
 }
 
 // Reorganiza as tarefas planejadas nos horários atuais da agenda, a partir de
@@ -265,7 +352,7 @@ export interface Replano extends Encaixe {
 export function replanejar(d: Dados, desde: string, comAtrasadas: boolean, agoraMin: number | null = null, h = hoje()): Replano {
   const alvo = aReplanejar(d, desde, comAtrasadas, h);
   const r = encaixar(d, alvo.map((t) => t.key), desde, agoraMin, h);
-  return { ...r, antes: alvo.map((t) => ({ key: t.key, plano: t.plano ?? null, hora: t.hora ?? null })) };
+  return { ...r, antes: alvo.map(posicao) };
 }
 
 export function aPlanejar(d: Dados): Tarefa[] {
@@ -276,7 +363,7 @@ export function atrasada(t: Tarefa, h = hoje()): boolean {
   return !t.feita && !!t.plano && t.plano < h;
 }
 
-export function planoDeHoje(d: Dados): Tarefa[] {
+export function planoDeHoje(d: Dados): TarefaNoDia[] {
   const h = hoje();
   return plano(d, h, h).get(h) ?? [];
 }
@@ -317,7 +404,7 @@ export function juntar(atual: Dados | null, lida: Leitura): Dados {
   const tarefasAtuais = new Map(base.tarefas.map((t) => [t.key, t]));
   const tarefas = lida.tarefas.map((nova) => {
     const velha = tarefasAtuais.get(nova.key);
-    return velha ? { ...nova, feita: velha.feita, data: velha.data, chEfetivaMin: velha.chEfetivaMin, questoes: velha.questoes, acertos: velha.acertos, plano: velha.plano ?? null, hora: velha.hora ?? null } : nova;
+    return velha ? { ...nova, feita: velha.feita, data: velha.data, chEfetivaMin: velha.chEfetivaMin, questoes: velha.questoes, acertos: velha.acertos, plano: velha.plano ?? null, hora: velha.hora ?? null, partes: velha.partes ?? null } : nova;
   });
   // Tarefas que só existem no app (planilha antiga) continuam.
   for (const t of base.tarefas) if (!tarefas.some((x) => x.key === t.key)) tarefas.push(t);
@@ -372,5 +459,5 @@ export function simularFolgas(d: Dados, dias: string[], agoraMin: number | null 
   const desde = novas[0];
   const r = replanejar(copia, desde, false, desde <= h ? agoraMin : null, h);
   const fim = (xs: (string | null)[]) => xs.reduce<string | null>((m, x) => (x && (!m || x > m) ? x : m), null);
-  return { ...r, folgas: novas, fimAntes: fim(r.antes.map((a) => a.plano)), fimDepois: fim(r.colocadas.map((c) => c.dia)) };
+  return { ...r, folgas: novas, fimAntes: fim(r.antes.map((a) => a.partes?.[a.partes.length - 1].dia ?? a.plano)), fimDepois: fim(r.colocadas.map((c) => c.partes[c.partes.length - 1].dia)) };
 }

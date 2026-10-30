@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Tarefa } from '../data/model';
-import { aPlanejar, atrasada, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
+import { aPlanejar, atrasada, colocar, dataCurta, diaCurto, fmtMin, hhmm, hoje, minDe, nomeDisciplina, plano, rotulo, segundaDaSemana, somarDias, trilhas } from '../data/logica';
 import { EditorAgenda, PainelEncaixe, PainelReplanejar } from './Agenda';
 import { Shell } from './Shell';
 import { type Ctx, type Vista, VistaFila, VistaHorario, VistaQuatro } from './SemanaVistas';
@@ -39,15 +39,16 @@ export function Semana() {
 
   let feitoMin = 0;
   let planejadoMin = 0;
-  let planejadas = 0;
+  const planejadasKeys = new Set<string>();
   for (const ts of dias.values())
     for (const t of ts) {
       if (t.feita) feitoMin += t.chEfetivaMin ?? 0;
-      else planejadas++;
+      else planejadasKeys.add(t.key);
       planejadoMin += t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin;
     }
+  const planejadas = planejadasKeys.size;
   const atrasadas = d.tarefas.filter((t) => atrasada(t, h)).length;
-  const pendentesNaSemana = [...dias.values()].flat().filter((t) => !t.feita);
+  const pendentesNaSemana = [...new Map([...dias.values()].flat().filter((t) => !t.feita).map((t) => [t.key, t])).values()];
 
   const setVista = (v: Vista) => {
     setVistaEstado(v);
@@ -59,9 +60,9 @@ export function Semana() {
     setArrastando(null);
     setAlvo(null);
     if (dia !== null && dia < h) return;
-    if ((t.plano ?? null) === dia && (t.hora ?? null) === hora) return setSel(null);
+    if ((t.plano ?? null) === dia && (t.hora ?? null) === hora && !t.partes) return setSel(null);
     alterar(dia ? `${rotulo(t)} planejada para ${diaCurto(dia)} ${dataCurta(dia)}${hora ? ' às ' + hora : ''}` : `${rotulo(t)} sem dia`, (x) => {
-      Object.assign(x.tarefas.find((y) => y.key === t.key)!, { plano: dia, hora: dia ? hora : null });
+      colocar(x.tarefas.find((y) => y.key === t.key)!, dia ? { dia, hora } : null);
     });
     setSel(null);
   };
@@ -99,7 +100,7 @@ export function Semana() {
     if (!confirm(`Tirar as ${pendentesNaSemana.length} tarefas pendentes desta semana? Elas voltam para “A planejar”.`)) return;
     const keys = new Set(pendentesNaSemana.map((t) => t.key));
     alterar(`Semana de ${dataCurta(inicio)} limpa`, (x) => {
-      for (const t of x.tarefas) if (keys.has(t.key)) Object.assign(t, { plano: null, hora: null });
+      for (const t of x.tarefas) if (keys.has(t.key)) colocar(t, null);
     });
   };
 

@@ -33,6 +33,14 @@ export interface Tarefa {
   row: number; // linha na aba CICLO
   plano?: string | null; // dia em que você colocou a tarefa na Semana (AAAA-MM-DD)
   hora?: string | null; // início no dia ("08:00"), quando encaixada na agenda
+  partes?: Parte[] | null; // quando a tarefa foi dividida entre janelas ou dias; a primeira é plano/hora
+}
+
+// Um pedaço de uma tarefa dividida: continua no próximo horário livre.
+export interface Parte {
+  dia: string;
+  hora: string;
+  min: number;
 }
 
 // Horários de estudo de um dia da semana, ex.: [{ inicio: '08:00', fim: '11:00' }].

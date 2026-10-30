@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useDados, useLoja } from '../data/store';
 import type { Dados, Tarefa } from '../data/model';
-import { atrasada, fmtMin, fmtRelogio, hoje, nomeDisciplina, ordenadas, pct, planoDeHoje, rotulo, somarDias, tarefa, diaCurto, dataCurta } from '../data/logica';
+import { atrasada, chaveBloco, fmtMin, fmtRelogio, hoje, nomeDisciplina, ordenadas, pct, planoDeHoje, rotulo, somarDias, tarefa, diaCurto, dataCurta } from '../data/logica';
 import { Shell } from './Shell';
 import { ir, link } from './rota';
 
@@ -92,8 +92,8 @@ function Inicio() {
           {plano.length > 0 && (
             <section aria-label="Plano do dia" className="plano-dia" style={{ ['--cols' as string]: Math.min(plano.length, 4) }}>
               {plano.slice(0, 4).map((t) => (
-                <div key={t.key} style={{ borderTop: `3px solid ${t === proxima ? 'var(--mark)' : t.feita ? 'var(--ink)' : '#2E2C28'}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span className="rotulo">{!t.feita && t.hora ? `${t.hora} · ` : ''}{rotulo(t)} · {fmtMin(t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin)}{t.feita ? ' · feita' : ''}</span>
+                <div key={chaveBloco(t)} style={{ borderTop: `3px solid ${t === proxima ? 'var(--mark)' : t.feita ? 'var(--ink)' : '#2E2C28'}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span className="rotulo">{!t.feita && t.hora ? `${t.hora} · ` : ''}{rotulo(t)}{t.parte ? ` (parte ${t.parte.i + 1}/${t.parte.n})` : ''} · {fmtMin(t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin)}{t.feita ? ' · feita' : ''}</span>
                   <span style={{ fontSize: 15, color: t === proxima ? 'var(--ink)' : 'var(--text2)' }}>{nomeDisciplina(d, t)}</span>
                 </div>
               ))}

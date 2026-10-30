@@ -1,5 +1,5 @@
 import type { Dados, Tarefa } from './model';
-import { aPlanejar, atrasada, encaixar, hoje, horarios, plano, replanejar, simularFolgas, somarDias } from './logica';
+import { aPlanejar, atrasada, colocar, encaixar, hoje, horarios, plano, replanejar, simularFolgas, somarDias } from './logica';
 
 function tarefa(n: number, extra: Partial<Tarefa> = {}): Tarefa {
   return { key: `1:${n}`, trilha: 1, num: n, disciplina: 'PORTUGUÊS', descricao: '', chMin: 90, feita: false, data: null, chEfetivaMin: null, questoes: null, acertos: null, row: n, ...extra };
@@ -51,9 +51,30 @@ describe('encaixe na agenda', () => {
     const d = base([1, 2, 3, 4, 5].map((n) => tarefa(n)));
     const r = encaixar(d, d.tarefas.map((t) => t.key), seg, null, seg);
     expect(r.colocadas.map((c) => `${c.dia} ${c.hora}`)).toEqual([
-      `${seg} 08:00`, `${seg} 09:30`, `${seg} 14:00`, `${seg} 15:30`, '2026-11-09 08:00',
+      `${seg} 08:00`, `${seg} 09:30`, `${seg} 14:00`, `${seg} 15:30`, '2026-11-04 19:00',
     ]);
+    // A 5ª tem 1h na quarta e continua na segunda seguinte.
+    expect(r.colocadas[4].partes).toEqual([{ dia: '2026-11-04', hora: '19:00', min: 60 }, { dia: '2026-11-09', hora: '08:00', min: 30 }]);
     expect(r.colocadas.some((c) => c.dia === ter)).toBe(false);
+  });
+
+  it('a sobra da janela recebe o começo da próxima tarefa, que continua no próximo horário', () => {
+    // Segunda 08:00–11:20 e 14:00–17:00: três de 1h30 → a terceira fica 20 min de manhã e 1h10 à tarde.
+    const d = { ...dados([1, 2, 3].map((n) => tarefa(n))), agenda: [[{ inicio: '08:00', fim: '11:20' }, { inicio: '14:00', fim: '17:00' }], [], [], [], [], [], []] };
+    const r = encaixar(d, d.tarefas.map((t) => t.key), seg, null, seg);
+    expect(r.colocadas[2].partes).toEqual([{ dia: seg, hora: '11:00', min: 20 }, { dia: seg, hora: '14:00', min: 70 }]);
+    for (const c of r.colocadas) colocar(d.tarefas.find((t) => t.key === c.key)!, c);
+    const p = plano(d, seg, seg).get(seg)!;
+    expect(p.map((t) => `${t.hora} ${t.num} ${t.chMin}`)).toEqual(['08:00 1 90', '09:30 2 90', '11:00 3 20', '14:00 3 70']);
+    expect(p[3].parte).toEqual({ i: 1, n: 2 });
+  });
+
+  it('sobra menor que 15 min fica livre; tarefa já dividida ocupa os pedaços dela', () => {
+    const d = { ...dados([tarefa(1, { chMin: 170 }), tarefa(2)]), agenda: [[{ inicio: '08:00', fim: '11:00' }], [{ inicio: '08:00', fim: '11:00' }], [], [], [], [], []] };
+    const r = encaixar(d, ['1:1', '1:2'], seg, null, seg);
+    expect(r.colocadas[1].partes).toEqual([{ dia: ter, hora: '08:00', min: 90 }]);
+    colocar(d.tarefas[0], { dia: seg, hora: '08:00', partes: [{ dia: seg, hora: '08:00', min: 100 }, { dia: ter, hora: '08:00', min: 70 }] });
+    expect(encaixar(d, ['1:2'], seg, null, seg).colocadas[0].partes).toEqual([{ dia: seg, hora: '09:40', min: 80 }, { dia: ter, hora: '09:10', min: 10 }]);
   });
 
   it('não usa horário já ocupado e nunca mexe nas tarefas que já têm dia', () => {
@@ -69,9 +90,10 @@ describe('encaixe na agenda', () => {
     expect(r.colocadas[0]).toMatchObject({ dia: seg, hora: '09:00' });
   });
 
-  it('avisa o que não cabe em nenhum horário', () => {
+  it('tarefa maior que qualquer janela é dividida; sem agenda nenhuma, avisa', () => {
     const d = base([tarefa(1, { chMin: 240 })]);
-    expect(encaixar(d, ['1:1'], seg, null, seg).semEspaco).toEqual(['1:1']);
+    expect(encaixar(d, ['1:1'], seg, null, seg).colocadas[0].partes).toEqual([{ dia: seg, hora: '08:00', min: 180 }, { dia: seg, hora: '14:00', min: 60 }]);
+    expect(encaixar(dados([tarefa(1)]), ['1:1'], seg, null, seg).semEspaco).toEqual(['1:1']);
   });
 });
 

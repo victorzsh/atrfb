@@ -2,8 +2,8 @@ import { useState } from 'react';
 import type { Dados, Tarefa } from '../data/model';
 import { useLoja } from '../data/store';
 import {
-  aPlanejar, atrasada, dataCurta, diaCurto, ehFolga, encaixar, fmtMin, hhmm, horarios, intervalosDoDia, minDe,
-  minutosDisponiveis, nomeDisciplina, plano, rotulo, simularFolgas, somarDias, temAgenda,
+  aPlanejar, atrasada, chaveBloco, colocar, dataCurta, diaCurto, ehFolga, encaixar, fmtMin, hhmm, horarios, intervalosDoDia, minDe,
+  minutosDisponiveis, nomeDisciplina, pedacosNoDia, plano, type Posicao, restaurar, rotulo, simularFolgas, somarDias, type TarefaNoDia, temAgenda, ultimoDiaDe,
 } from '../data/logica';
 import { link } from './rota';
 
@@ -31,6 +31,11 @@ export function agoraMin(): number {
 
 const dur = (t: Tarefa) => (t.feita ? t.chEfetivaMin ?? t.chMin : t.chMin);
 const diaNum = (iso: string) => dataCurta(iso).split(' ')[0];
+
+// "T-91" ou, para um pedaço de tarefa dividida, "T-91 · 1/2".
+function nomeBloco(t: TarefaNoDia) {
+  return t.parte ? `${rotulo(t)} · ${t.parte.i + 1}/${t.parte.n}` : rotulo(t);
+}
 
 function classeBloco(c: Ctx, t: Tarefa, atual?: string) {
   return `bloco${t.feita ? ' feito' : ' movel'}${t.key === atual ? ' agora' : ''}${c.sel === t.key ? ' sel' : ''}${c.arrastandoKey === t.key ? ' fantasma' : ''}`;
@@ -98,22 +103,22 @@ export function VistaHorario({ c }: { c: Ctx }) {
                   <>
                     <span className="mono" style={{ fontSize: 10, display: 'flex', justifyContent: 'space-between', gap: 4 }}>
                       <span>{hhmm(ini)}–{hhmm(f)}</span>
-                      <span style={{ fontWeight: atrasada(t, h) ? 600 : 400 }}>{atrasada(t, h) ? 'atrasada' : rotulo(t)}</span>
+                      <span style={{ fontWeight: atrasada(t, h) ? 600 : 400 }}>{atrasada(t, h) ? 'atrasada' : nomeBloco(t)}</span>
                     </span>
                     <span style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.2 }}>{nomeDisciplina(d, t)}</span>
                   </>
                 );
                 return t.feita ? (
-                  <a key={t.key} href={link('ciclo/' + t.key)} className={`${classeBloco(c, t)} horario-bloco`} style={estilo} title={t.descricao}>{conteudo}</a>
+                  <a key={chaveBloco(t)} href={link('ciclo/' + t.key)} className={`${classeBloco(c, t)} horario-bloco`} style={estilo} title={t.descricao}>{conteudo}</a>
                 ) : (
                   <button
-                    key={t.key}
+                    key={chaveBloco(t)}
                     type="button"
                     {...c.arrastavel(t, dia)}
                     className={`${classeBloco(c, t, atual)} horario-bloco`}
                     style={estilo}
                     aria-pressed={c.sel === t.key}
-                    aria-label={`${rotulo(t)}, ${nomeDisciplina(d, t)}, ${hhmm(ini)}. Arraste para outro dia ou horário, ou clique para mover.`}
+                    aria-label={`${nomeBloco(t)}, ${nomeDisciplina(d, t)}, ${hhmm(ini)}. Arraste para outro dia ou horário, ou clique para mover.`}
                     title={t.descricao}
                   >
                     {conteudo}
@@ -151,8 +156,11 @@ export function VistaFila({ c, inicio = c.inicio, comPrevia = true }: { c: Ctx; 
   const soltas = aPlanejar(d);
   const desde = inicio > h ? inicio : h;
   const enc = comPrevia && agenda && soltas.length ? encaixar(d, soltas.map((t) => t.key), desde, desde === h ? agoraMin() : null, h) : null;
-  const fantasmas = new Map<string, Tarefa[]>();
-  if (previa && enc) for (const x of enc.colocadas) if (x.dia <= fim) fantasmas.set(x.dia, [...(fantasmas.get(x.dia) ?? []), d.tarefas.find((t) => t.key === x.key)!]);
+  const fantasmas = new Map<string, TarefaNoDia[]>();
+  if (previa && enc)
+    for (const x of enc.colocadas)
+      for (const p of pedacosNoDia(d.tarefas.find((t) => t.key === x.key)!, x.partes))
+        if (p.plano! >= inicio && p.plano! <= fim) fantasmas.set(p.plano!, [...(fantasmas.get(p.plano!) ?? []), p]);
   const nestaSemana = [...fantasmas.values()].flat().length;
 
   let escala = 8 * 60;
@@ -166,9 +174,9 @@ export function VistaFila({ c, inicio = c.inicio, comPrevia = true }: { c: Ctx; 
   const confirmar = () => {
     if (!enc?.colocadas.length) return;
     alterar(`Tarefas sem dia encaixadas na agenda (${enc.colocadas.length})`, (x) => {
-      for (const p of enc.colocadas) Object.assign(x.tarefas.find((t) => t.key === p.key)!, { plano: p.dia, hora: p.hora });
+      for (const p of enc.colocadas) colocar(x.tarefas.find((t) => t.key === p.key)!, p);
     });
-    const u = enc.colocadas[enc.colocadas.length - 1].dia;
+    const u = enc.colocadas[enc.colocadas.length - 1].partes.at(-1)!.dia;
     setFeito({ keys: enc.colocadas.map((p) => p.key), msg: `${enc.colocadas.length} encaixadas, até ${diaCurto(u)} ${dataCurta(u)}.` });
     setPrevia(false);
   };
@@ -176,7 +184,7 @@ export function VistaFila({ c, inicio = c.inicio, comPrevia = true }: { c: Ctx; 
     if (!feito) return;
     const keys = new Set(feito.keys);
     alterar('Encaixe desfeito', (x) => {
-      for (const t of x.tarefas) if (keys.has(t.key) && !t.feita) Object.assign(t, { plano: null, hora: null });
+      for (const t of x.tarefas) if (keys.has(t.key) && !t.feita) colocar(t, null);
     });
     setFeito(null);
   };
@@ -223,7 +231,7 @@ export function VistaFila({ c, inicio = c.inicio, comPrevia = true }: { c: Ctx; 
             <div key={dia} style={{ display: 'contents' }}>
               <div className="fila-dia">
                 <span style={{ fontSize: 17, fontWeight: dia === h ? 600 : 500, letterSpacing: '-.02em', textTransform: 'capitalize' }}>{diaCurto(dia)} {diaNum(dia)}{dia === h ? ' · hoje' : ''}</span>
-                <span className="mono muted" style={{ fontSize: 10 }}>{ts.length ? `${ts.filter((t) => t.feita).length} de ${ts.length} feitas` : ''}</span>
+                <span className="mono muted" style={{ fontSize: 10 }}>{ts.length ? `${ts.filter((t) => t.feita).length} de ${new Set(ts.map((t) => t.key)).size} feitas` : ''}</span>
               </div>
               <div className={`fila-barra${c.alvo === dia ? ' alvo' : ''}`} {...c.zona(dia, aberto, (e) => c.soltar(e, dia))}>
                 <span className="fila-agenda" style={{ width: pct(disp) }} />
@@ -233,24 +241,24 @@ export function VistaFila({ c, inicio = c.inicio, comPrevia = true }: { c: Ctx; 
                   const props = {
                     className: `${classeBloco(c, t, atual)} fila-peca${fora ? ' fora' : ''}${atrasada(t, h) ? ' atrasada' : ''}`,
                     style: { left: `calc(${pct(x)} + 2px)`, width: `calc(${pct(w)} - 4px)` },
-                    title: `${rotulo(t)} · ${nomeDisciplina(d, t)} · ${fmtMin(w)}${t.hora ? ' · ' + t.hora : ''}`,
+                    title: `${nomeBloco(t)} · ${nomeDisciplina(d, t)} · ${fmtMin(w)}${t.hora ? ' · ' + t.hora : ''}`,
                   };
                   const miolo = (
                     <>
-                      <span className="mono" style={{ fontSize: 9.5 }}>{atrasada(t, h) ? `${rotulo(t)} · atrasada` : rotulo(t)}</span>
+                      <span className="mono" style={{ fontSize: 9.5 }}>{atrasada(t, h) ? `${nomeBloco(t)} · atrasada` : nomeBloco(t)}</span>
                       <span className="fila-nome">{nomeDisciplina(d, t)}</span>
                     </>
                   );
                   const el = t.feita
-                    ? <a key={t.key} href={link('ciclo/' + t.key)} {...props}>{miolo}</a>
-                    : <button key={t.key} type="button" {...c.arrastavel(t, dia)} {...props} aria-pressed={c.sel === t.key}>{miolo}</button>;
+                    ? <a key={chaveBloco(t)} href={link('ciclo/' + t.key)} {...props}>{miolo}</a>
+                    : <button key={chaveBloco(t)} type="button" {...c.arrastavel(t, dia)} {...props} aria-pressed={c.sel === t.key}>{miolo}</button>;
                   x += w;
                   return el;
                 })}
                 {fts.map((t) => {
                   const el = (
-                    <span key={t.key} className="bloco fila-peca previa" style={{ left: `calc(${pct(x)} + 2px)`, width: `calc(${pct(t.chMin)} - 4px)` }}>
-                      <span className="mono" style={{ fontSize: 9.5 }}>{rotulo(t)}</span>
+                    <span key={chaveBloco(t)} className="bloco fila-peca previa" style={{ left: `calc(${pct(x)} + 2px)`, width: `calc(${pct(t.chMin)} - 4px)` }}>
+                      <span className="mono" style={{ fontSize: 9.5 }}>{nomeBloco(t)}</span>
                       <span className="fila-nome">{nomeDisciplina(d, t)}</span>
                     </span>
                   );
@@ -281,20 +289,22 @@ export function VistaQuatro({ c, irPara }: { c: Ctx; irPara: (semanas: number) =
   const { alterar } = useLoja();
   const [aberta, setAberta] = useState(0);
   const [marcados, setMarcados] = useState<string[]>([]);
-  const [aplicado, setAplicado] = useState<{ antes: { key: string; plano: string | null; hora: string | null }[]; folgas: string[]; msg: string } | null>(null);
+  const [aplicado, setAplicado] = useState<{ antes: Posicao[]; folgas: string[]; msg: string } | null>(null);
   const fim = somarDias(c.inicio, 27);
   const mapa = plano(d, c.inicio, fim);
   const atual = d.sessao?.tarefaKey;
   const sim = marcados.length ? simularFolgas(d, marcados, agoraMin(), h) : null;
   const novo = new Map(sim?.colocadas.map((x) => [x.key, x.dia]));
+  const chegando = new Map<string, TarefaNoDia[]>();
+  for (const x of sim?.colocadas ?? [])
+    for (const p of pedacosNoDia(d.tarefas.find((t) => t.key === x.key)!, x.partes)) chegando.set(p.plano!, [...(chegando.get(p.plano!) ?? []), p]);
   const mexidas = new Set(sim?.antes.map((a) => a.key));
 
   // Com simulação, cada tarefa mexida aparece no dia novo (ou some, se não couber).
-  const doDia = (dia: string): Tarefa[] => {
+  const doDia = (dia: string): TarefaNoDia[] => {
     if (!sim) return mapa.get(dia) ?? [];
     const ficam = (mapa.get(dia) ?? []).filter((t) => !mexidas.has(t.key));
-    const chegam = d.tarefas.filter((t) => novo.get(t.key) === dia);
-    return [...ficam, ...chegam];
+    return [...ficam, ...(chegando.get(dia) ?? [])];
   };
   const mudou = (t: Tarefa) => !!sim && mexidas.has(t.key) && novo.get(t.key) !== t.plano;
   const nMudam = sim ? sim.antes.filter((a) => novo.get(a.key) !== a.plano).length : 0;
@@ -312,7 +322,7 @@ export function VistaQuatro({ c, irPara }: { c: Ctx; irPara: (semanas: number) =
       const pos = new Map(sim.colocadas.map((p) => [p.key, p]));
       for (const a of sim.antes) {
         const p = pos.get(a.key);
-        Object.assign(x.tarefas.find((t) => t.key === a.key)!, p ? { plano: p.dia, hora: p.hora } : { plano: null, hora: null });
+        colocar(x.tarefas.find((t) => t.key === a.key)!, p ?? null);
       }
     });
     setAplicado({ antes: sim.antes, folgas: sim.folgas, msg: `${nMudam} tarefas mudaram de dia. O plano agora vai até ${sim.fimDepois ? `${diaCurto(sim.fimDepois)} ${dataCurta(sim.fimDepois)}` : '—'}.` });
@@ -325,7 +335,7 @@ export function VistaQuatro({ c, irPara }: { c: Ctx; irPara: (semanas: number) =
       x.folgas = (x.folgas ?? []).filter((y) => !fs.has(y));
       for (const a of aplicado.antes) {
         const t = x.tarefas.find((y) => y.key === a.key);
-        if (t && !t.feita) Object.assign(t, { plano: a.plano, hora: a.hora });
+        if (t && !t.feita) restaurar(t, a);
       }
     });
     setAplicado(null);
@@ -334,7 +344,10 @@ export function VistaQuatro({ c, irPara }: { c: Ctx; irPara: (semanas: number) =
   const semanas = [0, 1, 2, 3].map((w) => Array.from({ length: 7 }, (_, k) => somarDias(c.inicio, w * 7 + k)));
   const ultimoDia = (() => {
     let m: string | null = null;
-    for (const t of d.tarefas) if (!t.feita && t.plano && (!m || t.plano > m)) m = t.plano;
+    for (const t of d.tarefas) {
+      const u = ultimoDiaDe(t);
+      if (u && (!m || u > m)) m = u;
+    }
     return m;
   })();
 
@@ -377,7 +390,7 @@ export function VistaQuatro({ c, irPara }: { c: Ctx; irPara: (semanas: number) =
                 const ts = doDia(dia);
                 const folga = ehFolga(d, dia) || marcados.includes(dia);
                 const disp = minutosDisponiveis(d, dia);
-                const fimTrilha = ts.find((t) => !d.tarefas.some((o) => o.trilha === t.trilha && o.key !== t.key && (o.num ?? 0) > (t.num ?? 0)));
+                const fimTrilha = ts.find((t) => (!t.parte || t.parte.i === t.parte.n - 1) && !d.tarefas.some((o) => o.trilha === t.trilha && o.key !== t.key && (o.num ?? 0) > (t.num ?? 0)));
                 return (
                   <div
                     key={dia}
@@ -393,13 +406,13 @@ export function VistaQuatro({ c, irPara }: { c: Ctx; irPara: (semanas: number) =
                     <span style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                       {ts.map((t) => (
                         <button
-                          key={t.key}
+                          key={chaveBloco(t)}
                           type="button"
                           {...(t.feita ? {} : c.arrastavel(t, dia))}
                           onClick={(e) => { e.stopPropagation(); if (!t.feita) c.setSel(c.sel === t.key ? null : t.key); }}
                           className={`q quatro-q${t.feita ? ' feito' : ''}${t.key === atual ? ' agora' : ''}${mudou(t) ? ' mudou' : ''}${c.sel === t.key ? ' sel' : ''}${atrasada(t, h) ? ' atrasada' : ''}`}
                           style={{ background: !t.feita && t.key !== atual && !mudou(t) && t.trilha % 2 === 0 ? 'var(--mark-1)' : undefined }}
-                          title={`${rotulo(t)} · ${nomeDisciplina(d, t)}${atrasada(t, h) ? ' · atrasada' : ''}`}
+                          title={`${nomeBloco(t)} · ${nomeDisciplina(d, t)}${atrasada(t, h) ? ' · atrasada' : ''}`}
                           aria-label={`${rotulo(t)}, ${nomeDisciplina(d, t)}`}
                         />
                       ))}
